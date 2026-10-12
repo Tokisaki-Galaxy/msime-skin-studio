@@ -7,6 +7,7 @@ interface ConfigPanelProps {
   selectedAccessoryId: string | null;
   onSelectAccessory: (id: string | null) => void;
   onRemoveAccessory: (id: string) => void;
+  isDarkMode?: boolean;
 }
 
 export const ConfigPanel: React.FC<ConfigPanelProps> = ({
@@ -14,7 +15,8 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   onChange,
   selectedAccessoryId,
   onSelectAccessory,
-  onRemoveAccessory
+  onRemoveAccessory,
+  isDarkMode = false
 }) => {
   const updateMeta = (field: string, val: any) => {
     onChange({
@@ -64,10 +66,14 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   const selectedAcc = config.accessories?.find(a => a.id === selectedAccessoryId);
 
   return (
-    <div className="flex flex-col h-full bg-slate-900 border-l border-slate-800 w-84 select-none overflow-y-auto">
+    <div className={`flex flex-col h-full border-l w-84 select-none overflow-y-auto transition-colors ${
+      isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-800'
+    }`}>
       {/* 选项卡标题 */}
-      <div className="p-4 border-b border-slate-800">
-        <h2 className="text-sm font-semibold text-slate-100">样式与属性微调</h2>
+      <div className={`p-4 border-b transition-colors ${
+        isDarkMode ? 'border-slate-800' : 'border-slate-100'
+      }`}>
+        <h2 className="text-sm font-semibold">样式与属性微调</h2>
         <p className="text-[11px] text-slate-400 mt-0.5">即时调整字体、色值、间距与挂件参数</p>
       </div>
 

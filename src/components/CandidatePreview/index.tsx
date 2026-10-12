@@ -53,9 +53,16 @@ export const CandidatePreview: React.FC<CandidatePreviewProps> = ({
   const windowSlice = candWin.border_slice_px;
   const windowWidthDip = candWin.border_width_dip;
 
+  // 搜狗与传统大背景图常带大立绘或较大原图高度，需保证合理最小高度
+  const minHeightDip = Math.max(
+    layoutMode === 'vertical' ? 120 : 48,
+    (windowWidthDip?.top ?? 0) + (windowWidthDip?.bottom ?? 0) + (layoutMode === 'vertical' ? 70 : 34)
+  );
+
   let windowBgStyle: React.CSSProperties = {
     backgroundColor: candWin.background_color || (bgImage ? 'transparent' : '#ffffff'),
     borderRadius: candWin.corner_radius_dip ? `${candWin.corner_radius_dip}px` : undefined,
+    minHeight: `${minHeightDip}px`,
   };
 
   if (bgImage) {
@@ -82,12 +89,12 @@ export const CandidatePreview: React.FC<CandidatePreviewProps> = ({
     }
   }
 
-  // 计算内容内边距 (有九宫格边宽时需文本内缩防护)
+  // 计算内容内边距 (保证边框花纹内部有足够安全的文本呼吸空间)
   const paddingStyle: React.CSSProperties = {
-    paddingTop: `${(candWin.margin_dip?.top ?? 0) + (windowWidthDip ? 0 : 8)}px`,
-    paddingRight: `${(candWin.margin_dip?.right ?? 0) + (windowWidthDip ? 0 : 12)}px`,
-    paddingBottom: `${(candWin.margin_dip?.bottom ?? 0) + (windowWidthDip ? 0 : 8)}px`,
-    paddingLeft: `${(candWin.margin_dip?.left ?? 0) + (windowWidthDip ? 0 : 12)}px`
+    paddingTop: `${(candWin.margin_dip?.top ?? 0) + 6}px`,
+    paddingRight: `${(candWin.margin_dip?.right ?? 0) + 12}px`,
+    paddingBottom: `${(candWin.margin_dip?.bottom ?? 0) + 6}px`,
+    paddingLeft: `${(candWin.margin_dip?.left ?? 0) + 12}px`
   };
 
   // 挂件拖拽交互

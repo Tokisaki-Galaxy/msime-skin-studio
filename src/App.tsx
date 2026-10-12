@@ -29,6 +29,9 @@ export const App: React.FC = () => {
   // 九宫格标定弹窗状态
   const [sliceModalTarget, setSliceModalTarget] = useState<'background' | 'highlight' | null>(null);
 
+  // 主题模式（默认明亮白色系）
+  const [isDarkMode, setIsDarkMode] = useState(false);
+
   // 初始化加载默认模板素材
   useEffect(() => {
     loadTemplate(SKIN_TEMPLATES[0]);
@@ -252,7 +255,9 @@ export const App: React.FC = () => {
   const sliceTargetInfo = getSliceTargetAsset();
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-950 font-sans">
+    <div className={`flex flex-col h-screen w-screen overflow-hidden font-sans transition-colors ${
+      isDarkMode ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-800'
+    }`}>
       {/* 顶部标题栏 */}
       <Header
         skinName={config.meta.name}
@@ -261,6 +266,8 @@ export const App: React.FC = () => {
         onSelectTemplate={loadTemplate}
         onImportSsf={handleImportSsf}
         onExport={handleExport}
+        isDarkMode={isDarkMode}
+        onToggleTheme={() => setIsDarkMode(!isDarkMode)}
       />
 
       {/* 主体三栏工作台 */}
@@ -277,26 +284,42 @@ export const App: React.FC = () => {
         />
 
         {/* 中央高保真仿真画布 */}
-        <main className="flex-1 flex flex-col relative overflow-hidden bg-slate-950">
+        <main className={`flex-1 flex flex-col relative overflow-hidden transition-colors ${
+          isDarkMode ? 'bg-slate-950' : 'bg-slate-100'
+        }`}>
           {/* 画布控制条 */}
-          <div className="h-10 border-b border-slate-800/80 px-4 flex items-center justify-between text-xs text-slate-400 bg-slate-900/40 select-none">
+          <div className={`h-10 border-b px-4 flex items-center justify-between text-xs select-none transition-colors ${
+            isDarkMode ? 'border-slate-800 bg-slate-900/60 text-slate-400' : 'border-slate-200 bg-white text-slate-600'
+          }`}>
             <div className="flex items-center gap-2">
               <span>壁纸氛围:</span>
               <button
                 onClick={() => setWallpaperMode('dark')}
-                className={`px-2 py-0.5 rounded transition ${wallpaperMode === 'dark' ? 'bg-slate-700 text-white' : 'hover:text-white'}`}
+                className={`px-2 py-0.5 rounded transition ${
+                  wallpaperMode === 'dark'
+                    ? 'bg-emerald-600 text-white font-medium'
+                    : isDarkMode ? 'hover:text-white' : 'hover:text-slate-900'
+                }`}
               >
                 深灰
               </button>
               <button
                 onClick={() => setWallpaperMode('light')}
-                className={`px-2 py-0.5 rounded transition ${wallpaperMode === 'light' ? 'bg-slate-700 text-white' : 'hover:text-white'}`}
+                className={`px-2 py-0.5 rounded transition ${
+                  wallpaperMode === 'light'
+                    ? 'bg-emerald-600 text-white font-medium'
+                    : isDarkMode ? 'hover:text-white' : 'hover:text-slate-900'
+                }`}
               >
                 浅色
               </button>
               <button
                 onClick={() => setWallpaperMode('grid')}
-                className={`px-2 py-0.5 rounded transition ${wallpaperMode === 'grid' ? 'bg-slate-700 text-white' : 'hover:text-white'}`}
+                className={`px-2 py-0.5 rounded transition ${
+                  wallpaperMode === 'grid'
+                    ? 'bg-emerald-600 text-white font-medium'
+                    : isDarkMode ? 'hover:text-white' : 'hover:text-slate-900'
+                }`}
               >
                 像素网格
               </button>
@@ -308,7 +331,10 @@ export const App: React.FC = () => {
                 type="text"
                 value={samplePinyin}
                 onChange={e => setSamplePinyin(e.target.value)}
-                className="bg-slate-800 border border-slate-700 rounded px-2 py-0.5 text-slate-200 text-xs w-44 outline-none focus:border-emerald-500"
+                className={`px-2 py-0.5 rounded border text-xs focus:outline-none focus:border-emerald-500 w-36 transition-colors ${
+                  isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-700'
+                }`}
+                placeholder="输入拼音测试..."
               />
             </div>
           </div>

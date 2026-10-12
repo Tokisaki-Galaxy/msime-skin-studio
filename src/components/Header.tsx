@@ -8,6 +8,8 @@ interface HeaderProps {
   layoutMode: 'horizontal' | 'vertical';
   onChangeLayoutMode: (mode: 'horizontal' | 'vertical') => void;
   skinName: string;
+  isDarkMode: boolean;
+  onToggleTheme: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -16,7 +18,9 @@ export const Header: React.FC<HeaderProps> = ({
   onExport,
   layoutMode,
   onChangeLayoutMode,
-  skinName
+  skinName,
+  isDarkMode,
+  onToggleTheme
 }) => {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -86,6 +90,14 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* 右侧动作按钮 */}
       <div className="flex items-center gap-2.5">
+        <button
+          onClick={onToggleTheme}
+          title={isDarkMode ? '切换到明亮白色主题' : '切换到暗色主题'}
+          className="p-1.5 text-sm rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 transition"
+        >
+          {isDarkMode ? '☀️' : '🌙'}
+        </button>
+
         <button
           onClick={() => fileInputRef.current?.click()}
           className="px-3.5 py-1.5 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition flex items-center gap-1.5 shadow-sm"

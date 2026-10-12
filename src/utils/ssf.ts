@@ -255,15 +255,18 @@ export async function processSsfArchive(
   const skinTitle = general['skin_name'] || fileName.replace(/\.ssf$/i, '') || 'Sogou_Port';
 
   let bgImage = '';
+  let bgImgFileName = '';
   if (cand['bg_cand']) {
     const candBgName = cand['bg_cand'].replace(/\\/g, '/').split('/').pop() || '';
     if (images[candBgName]) {
       bgImage = `assets/${candBgName}`;
+      bgImgFileName = candBgName;
     }
   } else if (schemeH1['pic']) {
     const h1PicName = schemeH1['pic'].replace(/\\/g, '/').split('/').pop() || '';
     if (images[h1PicName]) {
       bgImage = `assets/${h1PicName}`;
+      bgImgFileName = h1PicName;
     }
   }
 
@@ -271,6 +274,33 @@ export async function processSsfArchive(
     const candPng = Object.keys(images).find(k => k.toLowerCase().includes('skin1') || k.toLowerCase().includes('cand') || k.toLowerCase().includes('bg'));
     if (candPng) {
       bgImage = `assets/${candPng}`;
+      bgImgFileName = candPng;
+    }
+  }
+
+  // 探测背景图尺寸以保留搜狗大背景图的自然呼吸高度与内边距
+  let bgHeightPx = 0;
+  if (bgImgFileName && images[bgImgFileName]) {
+    try {
+      const dataUri = images[bgImgFileName];
+      const bin = atob(dataUri.split(',')[1]);
+      if (bgImgFileName.toLowerCase().endsWith('.png') && bin.length > 24) {
+        bgHeightPx = (bin.charCodeAt(20) << 24) | (bin.charCodeAt(21) << 16) | (bin.charCodeAt(22) << 8) | bin.charCodeAt(23);
+      }
+    } catch {}
+  }
+
+  // 如果搜狗配有 zhongwen_marge: left, top, right, bottom 绝对选区
+  let customMarginTop = 0;
+  let customMarginBottom = 0;
+  if (schemeH1['zhongwen_marge']) {
+    const parts = schemeH1['zhongwen_marge'].split(',').map(s => parseInt(s.trim(), 10) || 0);
+    if (parts.length === 4) {
+      // 搜狗: left, top, right, bottom
+      customMarginTop = parts[1];
+      if (bgHeightPx > 0 && parts[3] > 0) {
+        customMarginBottom = Math.max(0, bgHeightPx - (parts[1] + parts[3]));
+      }
     }
   }
 
@@ -309,7 +339,15 @@ export async function processSsfArchive(
       scale_mode: 'stretch',
       line_gap_dip: 8,
       item_gap_dip: 12,
-      ...(bgImage ? { background_image: bgImage } : {})
+      ...(bgImage ? { background_image: bgImage } : {}),
+      ...((customMarginTop > 0 || customMarginBottom > 0) ? {
+        margin_dip: {
+          top: customMarginTop,
+          right: margins.right,
+          bottom: customMarginBottom,
+          left: margins.left
+        }
+      } : {})
     },
     preedit: {
       text_color: parseSogouColor(cand['py_color'] || display['pinyin_color'], '#334155'),

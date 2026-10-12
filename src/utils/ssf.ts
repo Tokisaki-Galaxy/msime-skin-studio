@@ -1,7 +1,7 @@
 import JSZip from 'jszip';
 import CryptoJS from 'crypto-js';
 import * as pako from 'pako';
-import { SkinV2Config } from '../types/skin';
+import { SkinV2Config, AccessoryStyle } from '../types/skin';
 
 const AES_KEY_HEX = '5236461ad38503669045162879033623ddbe6f03ff04e3cad57ffca350e49ed9';
 const AES_IV_HEX = 'e07aad35e090aa038a51fd05df8c5d0f';
@@ -135,6 +135,20 @@ export function parseIni(text: string): Record<string, Record<string, string>> {
 export function parseSogouColor(raw?: string, fallback: string = '#333333'): string {
   if (!raw) return fallback;
   const trimmed = raw.trim();
+  
+  // 处理 0xRRGGBB 或 0xBBGGRR (搜狗常见 0x514df9 或 0xRRGGBB)
+  if (trimmed.startsWith('0x') || trimmed.startsWith('0X')) {
+    const hex = trimmed.slice(2).padStart(6, '0');
+    // 如果是 6 位十六进制
+    if (hex.length === 6) {
+      // 搜狗经典颜色很多是 BGR：0xBBGGRR
+      const b = hex.slice(0, 2);
+      const g = hex.slice(2, 4);
+      const r = hex.slice(4, 6);
+      return `#${r}${g}${b}`;
+    }
+  }
+
   if (trimmed.startsWith('#')) return trimmed;
   if (/^[0-9a-fA-F]{6}$/.test(trimmed)) return `#${trimmed}`;
   
@@ -229,8 +243,15 @@ export async function processSsfArchive(
   const parsedIni = parseIni(iniText);
   const cand = parsedIni['Skin_Cand'] || {};
   const general = parsedIni['General'] || {};
+  const display = parsedIni['Display'] || {};
+  const schemeH1 = parsedIni['Scheme_H1'] || {};
 
-  const margins = parseSogouMargins(cand['margin_cand']);
+  // 优先级：Skin_Cand.margin_cand -> Scheme_H1.zhongwen_marge
+  let margins = parseSogouMargins(cand['margin_cand']);
+  if (!cand['margin_cand'] && schemeH1['zhongwen_marge']) {
+    margins = parseSogouMargins(schemeH1['zhongwen_marge']);
+  }
+
   const skinTitle = general['skin_name'] || fileName.replace(/\.ssf$/i, '') || 'Sogou_Port';
 
   let bgImage = '';
@@ -239,11 +260,37 @@ export async function processSsfArchive(
     if (images[candBgName]) {
       bgImage = `assets/${candBgName}`;
     }
+  } else if (schemeH1['pic']) {
+    const h1PicName = schemeH1['pic'].replace(/\\/g, '/').split('/').pop() || '';
+    if (images[h1PicName]) {
+      bgImage = `assets/${h1PicName}`;
+    }
   }
+
   if (!bgImage) {
-    const candPng = Object.keys(images).find(k => k.toLowerCase().includes('cand') || k.toLowerCase().includes('bg'));
+    const candPng = Object.keys(images).find(k => k.toLowerCase().includes('skin1') || k.toLowerCase().includes('cand') || k.toLowerCase().includes('bg'));
     if (candPng) {
       bgImage = `assets/${candPng}`;
+    }
+  }
+
+  // 提取挂件 (Custom accessories)
+  const accessories: AccessoryStyle[] = [];
+  const customCnt = parseInt(schemeH1['custom_cnt'] || '0', 10);
+  for (let i = 0; i < customCnt; i++) {
+    const picKey = `custom${i}`;
+    const customPic = schemeH1[picKey];
+    if (customPic) {
+      const cleanPic = customPic.replace(/\\/g, '/').split('/').pop() || '';
+      if (images[cleanPic]) {
+        accessories.push({
+          id: `acc_${i}`,
+          image: `assets/${cleanPic}`,
+          anchor: 'top_left',
+          offset_dip: { x: 0, y: 0 },
+          z_order: 10 + i
+        });
+      }
     }
   }
 
@@ -252,8 +299,8 @@ export async function processSsfArchive(
       schema_version: 2,
       name: skinTitle,
       version: '1.0.0',
-      author: general['author'] || '搜狗皮肤转换器',
-      description: `从搜狗皮肤 ${fileName} 自动转换而来`,
+      author: general['author'] || general['skin_author'] || '搜狗皮肤转换器',
+      description: general['skin_info'] || `从搜狗皮肤 ${fileName} 自动转换而来`,
       supported_modes: ['horizontal']
     },
     candidate_window: {
@@ -265,23 +312,24 @@ export async function processSsfArchive(
       ...(bgImage ? { background_image: bgImage } : {})
     },
     preedit: {
-      text_color: parseSogouColor(cand['py_color'], '#334155'),
-      font_size_pt: 11
+      text_color: parseSogouColor(cand['py_color'] || display['pinyin_color'], '#334155'),
+      font_size_pt: parseInt(display['font_size'] || '11', 10) ? Math.min(16, Math.max(9, Math.round(parseInt(display['font_size'] || '11', 10) * 0.75))) : 11
     },
     candidate_item: {
-      text_color: parseSogouColor(cand['cand_color'], '#0f172a'),
-      number_color: parseSogouColor(cand['cand_num_color'], '#64748b'),
-      font_size_pt: 12
+      text_color: parseSogouColor(cand['cand_color'] || display['zhongwen_color'], '#0f172a'),
+      number_color: parseSogouColor(cand['cand_num_color'] || display['zhongwen_color'], '#64748b'),
+      font_size_pt: parseInt(display['font_size'] || '12', 10) ? Math.min(18, Math.max(10, Math.round(parseInt(display['font_size'] || '12', 10) * 0.75))) : 12
     },
     highlight_item: {
-      text_color: parseSogouColor(cand['cand_hl_color'], '#2563eb'),
-      number_color: parseSogouColor(cand['cand_hl_num_color'] || cand['cand_hl_color'], '#2563eb')
+      text_color: parseSogouColor(cand['cand_hl_color'] || display['zhongwen_first_color'], '#2563eb'),
+      number_color: parseSogouColor(cand['cand_hl_num_color'] || cand['cand_hl_color'] || display['zhongwen_first_color'], '#2563eb')
     },
     paging: {
       prev_color: parseSogouColor(cand['page_color'], '#94a3b8'),
       next_color: parseSogouColor(cand['page_color'], '#94a3b8'),
       font_size_pt: 10
-    }
+    },
+    ...(accessories.length > 0 ? { accessories } : {})
   };
 
   return { skinConfig, images };

@@ -1,0 +1,44 @@
+{
+  "name": "msime-skin-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@iconify/json": "^2.2.320",
+    "adm-zip": "^0.5.16",
+    "canvas-confetti": "^1.9.4",
+    "clsx": "^2.1.1",
+    "crypto-js": "^4.2.0",
+    "iconv-lite": "^0.6.3",
+    "jszip": "^3.10.1",
+    "lucide-react": "^1.16.0",
+    "pako": "^3.0.2",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "smob": "^1.5.0",
+    "tailwind-merge": "^3.0.2"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.7",
+    "@types/canvas-confetti": "^1.9.0",
+    "@types/crypto-js": "^4.2.2",
+    "@types/node": "^24.18.1",
+    "@types/pako": "^3.0.0",
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4",
+    "@vitejs/plugin-react": "^5.0.0",
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.3",
+    "tailwindcss": "^3.4.17",
+    "tsx": "^4.23.15",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.0",
+    "vitest": "^3.0.7"
+  }
+}

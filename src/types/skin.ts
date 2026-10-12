@@ -39,12 +39,18 @@ export interface CandidateWindowStyle {
   scale_mode?: ScaleMode;
   line_gap_dip?: number;
   item_gap_dip?: number;
+  min_width_dip?: number;
+  min_height_dip?: number;
 }
 
 export interface PreeditStyle {
   text_color?: string;
   font_size_pt?: number;
   font_weight?: number;
+  offset_dip?: {
+    x: number;
+    y: number;
+  };
 }
 
 export interface CandidateItemStyle {
@@ -97,6 +103,9 @@ export interface SkinV2Config {
   highlight_item?: HighlightItemStyle;
   paging?: PagingStyle;
   accessories?: AccessoryStyle[];
+  // 竖排专属配置
+  vertical_candidate_window?: CandidateWindowStyle;
+  vertical_accessories?: AccessoryStyle[];
 }
 
 export interface SkinAsset {

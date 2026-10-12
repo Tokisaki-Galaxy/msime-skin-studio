@@ -10,6 +10,7 @@ interface AssetManagerProps {
   onAddAccessoryFromAsset: (path: string) => void;
   onOpenSliceModal: (type: 'background' | 'highlight') => void;
   isDarkMode?: boolean;
+  layoutMode?: 'horizontal' | 'vertical';
 }
 
 export const AssetManager: React.FC<AssetManagerProps> = ({
@@ -20,9 +21,11 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
   onSetHighlightImage,
   onAddAccessoryFromAsset,
   onOpenSliceModal,
-  isDarkMode = false
+  isDarkMode = false,
+  layoutMode = 'horizontal'
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isDragOver, setIsDragOver] = React.useState(false);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -35,13 +38,51 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
     }
   };
 
-  const currentBg = config.candidate_window.background_image;
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+    const files = e.dataTransfer.files;
+    if (!files || files.length === 0) return;
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (file.type.startsWith('image/') || /\.(png|jpe?g|bmp|webp|gif)$/i.test(file.name)) {
+        const assetPath = `assets/${file.name}`;
+        onAddAsset(assetPath, file);
+      }
+    }
+  };
+
+  const isVertical = layoutMode === 'vertical';
+  const currentCandWin = (isVertical && config.vertical_candidate_window)
+    ? config.vertical_candidate_window
+    : config.candidate_window;
+  const currentBg = currentCandWin.background_image;
   const currentHl = config.highlight_item?.background_image;
 
   return (
-    <div className={`flex flex-col h-full border-r w-80 select-none transition-colors ${
-      isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-800'
-    }`}>
+    <div
+      onDragOver={handleDragOver}
+      onDragEnter={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      className={`flex flex-col h-full border-r w-80 select-none transition-colors relative ${
+        isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-800'
+      } ${isDragOver ? 'ring-2 ring-emerald-500 bg-emerald-500/10' : ''}`}
+    >
       {/* 顶部操作区 */}
       <div className={`p-4 border-b flex items-center justify-between transition-colors ${
         isDarkMode ? 'border-slate-800' : 'border-slate-100'
@@ -84,7 +125,7 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
           isDarkMode ? 'bg-slate-800/80 border-slate-700/80' : 'bg-white border-slate-200 shadow-sm'
         }`}>
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium">候选窗口背景</span>
+            <span className="text-xs font-medium">候选窗口背景 ({isVertical ? '竖排' : '横排'})</span>
             {currentBg && (
               <button
                 onClick={() => onOpenSliceModal('background')}

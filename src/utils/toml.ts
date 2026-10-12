@@ -52,6 +52,12 @@ export function serializeSkinToml(config: SkinV2Config): string {
   if (config.candidate_window.item_gap_dip !== undefined) {
     lines.push(`item_gap_dip = ${config.candidate_window.item_gap_dip}`);
   }
+  if (config.candidate_window.min_width_dip !== undefined) {
+    lines.push(`min_width_dip = ${config.candidate_window.min_width_dip}`);
+  }
+  if (config.candidate_window.min_height_dip !== undefined) {
+    lines.push(`min_height_dip = ${config.candidate_window.min_height_dip}`);
+  }
   lines.push('');
 
   // [preedit]
@@ -60,6 +66,9 @@ export function serializeSkinToml(config: SkinV2Config): string {
     if (config.preedit.text_color) lines.push(`text_color = ${escapeString(config.preedit.text_color)}`);
     if (config.preedit.font_size_pt !== undefined) lines.push(`font_size_pt = ${config.preedit.font_size_pt}`);
     if (config.preedit.font_weight !== undefined) lines.push(`font_weight = ${config.preedit.font_weight}`);
+    if (config.preedit.offset_dip) {
+      lines.push(`offset_dip = { x = ${config.preedit.offset_dip.x}, y = ${config.preedit.offset_dip.y} }`);
+    }
     lines.push('');
   }
 
@@ -100,6 +109,49 @@ export function serializeSkinToml(config: SkinV2Config): string {
   if (config.accessories && config.accessories.length > 0) {
     for (const acc of config.accessories) {
       lines.push('[[accessories]]');
+      lines.push(`id = ${escapeString(acc.id)}`);
+      lines.push(`image = ${escapeString(acc.image)}`);
+      lines.push(`anchor = ${escapeString(acc.anchor)}`);
+      lines.push(`offset_dip = { x = ${acc.offset_dip.x}, y = ${acc.offset_dip.y} }`);
+      if (acc.size_dip) {
+        lines.push(`size_dip = { width = ${acc.size_dip.width}, height = ${acc.size_dip.height} }`);
+      }
+      lines.push(`z_order = ${acc.z_order}`);
+      if (acc.attach_to) {
+        lines.push(`attach_to = ${escapeString(acc.attach_to)}`);
+      }
+      lines.push('');
+    }
+  }
+
+  // [vertical_candidate_window]
+  if (config.vertical_candidate_window) {
+    lines.push('[vertical_candidate_window]');
+    if (config.vertical_candidate_window.background_color) {
+      lines.push(`background_color = ${escapeString(config.vertical_candidate_window.background_color)}`);
+    }
+    if (config.vertical_candidate_window.background_image) {
+      lines.push(`background_image = ${escapeString(config.vertical_candidate_window.background_image)}`);
+    }
+    if (config.vertical_candidate_window.border_slice_px) {
+      lines.push(`border_slice_px = ${formatFourSides(config.vertical_candidate_window.border_slice_px)}`);
+    }
+    if (config.vertical_candidate_window.border_width_dip) {
+      lines.push(`border_width_dip = ${formatFourSides(config.vertical_candidate_window.border_width_dip)}`);
+    }
+    if (config.vertical_candidate_window.min_width_dip !== undefined) {
+      lines.push(`min_width_dip = ${config.vertical_candidate_window.min_width_dip}`);
+    }
+    if (config.vertical_candidate_window.min_height_dip !== undefined) {
+      lines.push(`min_height_dip = ${config.vertical_candidate_window.min_height_dip}`);
+    }
+    lines.push('');
+  }
+
+  // [[vertical_accessories]]
+  if (config.vertical_accessories && config.vertical_accessories.length > 0) {
+    for (const acc of config.vertical_accessories) {
+      lines.push('[[vertical_accessories]]');
       lines.push(`id = ${escapeString(acc.id)}`);
       lines.push(`image = ${escapeString(acc.image)}`);
       lines.push(`anchor = ${escapeString(acc.anchor)}`);

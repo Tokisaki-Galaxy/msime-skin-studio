@@ -8,6 +8,7 @@ interface ConfigPanelProps {
   onSelectAccessory: (id: string | null) => void;
   onRemoveAccessory: (id: string) => void;
   isDarkMode?: boolean;
+  layoutMode?: 'horizontal' | 'vertical';
 }
 
 export const ConfigPanel: React.FC<ConfigPanelProps> = ({
@@ -16,8 +17,17 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   selectedAccessoryId,
   onSelectAccessory,
   onRemoveAccessory,
-  isDarkMode = false
+  isDarkMode = false,
+  layoutMode = 'horizontal'
 }) => {
+  const isVertical = layoutMode === 'vertical';
+  const candWin = (isVertical && config.vertical_candidate_window)
+    ? config.vertical_candidate_window
+    : config.candidate_window;
+  const accessoriesList = (isVertical && config.vertical_accessories && config.vertical_accessories.length > 0)
+    ? config.vertical_accessories
+    : (config.accessories || []);
+
   const updateMeta = (field: string, val: any) => {
     onChange({
       ...config,
@@ -26,10 +36,20 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   };
 
   const updateCandidateWindow = (field: string, val: any) => {
-    onChange({
-      ...config,
-      candidate_window: { ...config.candidate_window, [field]: val }
-    });
+    if (isVertical) {
+      onChange({
+        ...config,
+        vertical_candidate_window: {
+          ...(config.vertical_candidate_window || config.candidate_window),
+          [field]: val
+        }
+      });
+    } else {
+      onChange({
+        ...config,
+        candidate_window: { ...config.candidate_window, [field]: val }
+      });
+    }
   };
 
   const updatePreedit = (field: string, val: any) => {
@@ -54,16 +74,26 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   };
 
   const updateAccessory = (id: string, field: string, val: any) => {
-    const nextAcc = (config.accessories || []).map(acc => {
-      if (acc.id === id) {
-        return { ...acc, [field]: val };
-      }
-      return acc;
-    });
-    onChange({ ...config, accessories: nextAcc });
+    if (isVertical && config.vertical_accessories && config.vertical_accessories.some(a => a.id === id)) {
+      const nextAcc = config.vertical_accessories.map(acc => {
+        if (acc.id === id) {
+          return { ...acc, [field]: val };
+        }
+        return acc;
+      });
+      onChange({ ...config, vertical_accessories: nextAcc });
+    } else {
+      const nextAcc = (config.accessories || []).map(acc => {
+        if (acc.id === id) {
+          return { ...acc, [field]: val };
+        }
+        return acc;
+      });
+      onChange({ ...config, accessories: nextAcc });
+    }
   };
 
-  const selectedAcc = config.accessories?.find(a => a.id === selectedAccessoryId);
+  const selectedAcc = accessoriesList.find(a => a.id === selectedAccessoryId);
 
   return (
     <div className={`flex flex-col h-full border-l w-84 select-none overflow-y-auto transition-colors ${
@@ -119,19 +149,19 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
         <div className="space-y-3">
           <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-            窗口与间距布局
+            窗口与间距布局 ({isVertical ? '竖排' : '横排'})
           </h3>
           <div className="space-y-3 text-xs">
             <div>
               <label className="text-slate-400 flex justify-between">
                 <span>窗口圆角 (Corner Radius)</span>
-                <span>{config.candidate_window.corner_radius_dip || 0}px</span>
+                <span>{candWin.corner_radius_dip || 0}px</span>
               </label>
               <input
                 type="range"
                 min="0"
                 max="32"
-                value={config.candidate_window.corner_radius_dip || 0}
+                value={candWin.corner_radius_dip || 0}
                 onChange={e => updateCandidateWindow('corner_radius_dip', Number(e.target.value))}
                 className="w-full h-1 bg-slate-700 rounded appearance-none accent-emerald-500 mt-1.5"
               />
@@ -140,46 +170,61 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
             <div>
               <label className="text-slate-400 flex justify-between">
                 <span>候选词间距 (Item Gap)</span>
-                <span>{config.candidate_window.item_gap_dip || 12}px</span>
+                <span>{candWin.item_gap_dip || 12}px</span>
               </label>
               <input
                 type="range"
                 min="4"
                 max="36"
-                value={config.candidate_window.item_gap_dip || 12}
+                value={candWin.item_gap_dip || 12}
                 onChange={e => updateCandidateWindow('item_gap_dip', Number(e.target.value))}
                 className="w-full h-1 bg-slate-700 rounded appearance-none accent-emerald-500 mt-1.5"
               />
             </div>
 
             <div>
-              <label className="text-slate-400 flex justify-between">
-                <span>行间距 (Line Gap)</span>
-                <span>{config.candidate_window.line_gap_dip || 8}px</span>
-              </label>
+              <div className="flex justify-between text-slate-400">
+                <label>窗口最小高度 (Min Height)</label>
+                <span className="font-mono">{candWin.min_height_dip ?? 0}px</span>
+              </div>
               <input
                 type="range"
                 min="0"
-                max="24"
-                value={config.candidate_window.line_gap_dip || 8}
-                onChange={e => updateCandidateWindow('line_gap_dip', Number(e.target.value))}
+                max="500"
+                value={candWin.min_height_dip ?? 0}
+                onChange={e => updateCandidateWindow('min_height_dip', Number(e.target.value))}
                 className="w-full h-1 bg-slate-700 rounded appearance-none accent-emerald-500 mt-1.5"
               />
             </div>
 
-            {!config.candidate_window.background_image && (
+            <div>
+              <div className="flex justify-between text-slate-400">
+                <label>窗口最小宽度 (Min Width)</label>
+                <span className="font-mono">{candWin.min_width_dip ?? 0}px</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="600"
+                value={candWin.min_width_dip ?? 0}
+                onChange={e => updateCandidateWindow('min_width_dip', Number(e.target.value))}
+                className="w-full h-1 bg-slate-700 rounded appearance-none accent-emerald-500 mt-1.5"
+              />
+            </div>
+
+            {!candWin.background_image && (
               <div>
                 <label className="text-slate-400">纯色背景色</label>
                 <div className="flex gap-2 items-center mt-1">
                   <input
                     type="color"
-                    value={config.candidate_window.background_color || '#ffffff'}
+                    value={candWin.background_color || '#ffffff'}
                     onChange={e => updateCandidateWindow('background_color', e.target.value)}
                     className="w-7 h-7 rounded border border-slate-700 bg-transparent cursor-pointer"
                   />
                   <input
                     type="text"
-                    value={config.candidate_window.background_color || '#ffffff'}
+                    value={candWin.background_color || '#ffffff'}
                     onChange={e => updateCandidateWindow('background_color', e.target.value)}
                     className="flex-1 bg-slate-800 border border-slate-700 rounded px-2.5 py-1 text-slate-100 font-mono"
                   />

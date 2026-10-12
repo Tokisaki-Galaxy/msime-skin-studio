@@ -112,22 +112,36 @@ export const App: React.FC = () => {
     const w = asset?.width || 32;
     const h = asset?.height || 32;
     const defaultSlice = {
-      top: Math.round(h * 0.25),
-      right: Math.round(w * 0.25),
-      bottom: Math.round(h * 0.25),
-      left: Math.round(w * 0.25)
+      top: Math.max(1, Math.min(24, Math.round(h * 0.25))),
+      right: Math.max(1, Math.min(24, Math.round(w * 0.25))),
+      bottom: Math.max(1, Math.min(24, Math.round(h * 0.25))),
+      left: Math.max(1, Math.min(24, Math.round(w * 0.25)))
     };
 
-    setConfig(prev => ({
-      ...prev,
-      candidate_window: {
-        ...prev.candidate_window,
-        background_image: pathKey,
-        border_slice_px: prev.candidate_window.border_slice_px || defaultSlice,
-        border_width_dip: prev.candidate_window.border_width_dip || defaultSlice,
-        scale_mode: 'stretch'
-      }
-    }));
+    const isVertical = layoutMode === 'vertical';
+    if (isVertical) {
+      setConfig(prev => ({
+        ...prev,
+        vertical_candidate_window: {
+          ...(prev.vertical_candidate_window || prev.candidate_window),
+          background_image: pathKey,
+          border_slice_px: prev.vertical_candidate_window?.border_slice_px || defaultSlice,
+          border_width_dip: prev.vertical_candidate_window?.border_width_dip || defaultSlice,
+          scale_mode: 'stretch'
+        }
+      }));
+    } else {
+      setConfig(prev => ({
+        ...prev,
+        candidate_window: {
+          ...prev.candidate_window,
+          background_image: pathKey,
+          border_slice_px: prev.candidate_window.border_slice_px || defaultSlice,
+          border_width_dip: prev.candidate_window.border_width_dip || defaultSlice,
+          scale_mode: 'stretch'
+        }
+      }));
+    }
   };
 
   // 设为高亮背景
@@ -136,10 +150,10 @@ export const App: React.FC = () => {
     const w = asset?.width || 24;
     const h = asset?.height || 24;
     const defaultSlice = {
-      top: Math.round(h * 0.25),
-      right: Math.round(w * 0.25),
-      bottom: Math.round(h * 0.25),
-      left: Math.round(w * 0.25)
+      top: Math.max(1, Math.min(24, Math.round(h * 0.25))),
+      right: Math.max(1, Math.min(24, Math.round(w * 0.25))),
+      bottom: Math.max(1, Math.min(24, Math.round(h * 0.25))),
+      left: Math.max(1, Math.min(24, Math.round(w * 0.25)))
     };
 
     setConfig(prev => ({
@@ -168,35 +182,54 @@ export const App: React.FC = () => {
       attach_to: 'window' as const
     };
 
-    setConfig(prev => ({
-      ...prev,
-      accessories: [...(prev.accessories || []), newAcc]
-    }));
+    if (layoutMode === 'vertical') {
+      setConfig(prev => ({
+        ...prev,
+        vertical_accessories: [...(prev.vertical_accessories || []), newAcc]
+      }));
+    } else {
+      setConfig(prev => ({
+        ...prev,
+        accessories: [...(prev.accessories || []), newAcc]
+      }));
+    }
     setSelectedAccessoryId(newId);
   };
 
   // 更新挂件偏移
   const handleUpdateAccessoryOffset = (id: string, offset: { x: number; y: number }, anchor?: AccessoryAnchor) => {
-    setConfig(prev => ({
-      ...prev,
-      accessories: (prev.accessories || []).map(acc => {
-        if (acc.id === id) {
-          return {
-            ...acc,
-            offset_dip: offset,
-            ...(anchor ? { anchor } : {})
-          };
-        }
-        return acc;
-      })
-    }));
+    setConfig(prev => {
+      const updateList = (list?: typeof prev.accessories) =>
+        (list || []).map(acc => {
+          if (acc.id === id) {
+            return {
+              ...acc,
+              offset_dip: offset,
+              ...(anchor ? { anchor } : {})
+            };
+          }
+          return acc;
+        });
+
+      if (layoutMode === 'vertical' && prev.vertical_accessories && prev.vertical_accessories.some(a => a.id === id)) {
+        return {
+          ...prev,
+          vertical_accessories: updateList(prev.vertical_accessories)
+        };
+      }
+      return {
+        ...prev,
+        accessories: updateList(prev.accessories)
+      };
+    });
   };
 
   // 移除挂件
   const handleRemoveAccessory = (id: string) => {
     setConfig(prev => ({
       ...prev,
-      accessories: (prev.accessories || []).filter(a => a.id !== id)
+      accessories: (prev.accessories || []).filter(a => a.id !== id),
+      vertical_accessories: (prev.vertical_accessories || []).filter(a => a.id !== id)
     }));
     if (selectedAccessoryId === id) {
       setSelectedAccessoryId(null);
@@ -206,14 +239,26 @@ export const App: React.FC = () => {
   // 保存切片标定
   const handleSaveSlice = (slices: FourSides<number>) => {
     if (sliceModalTarget === 'background') {
-      setConfig(prev => ({
-        ...prev,
-        candidate_window: {
-          ...prev.candidate_window,
-          border_slice_px: slices,
-          border_width_dip: slices
-        }
-      }));
+      const isVertical = layoutMode === 'vertical';
+      if (isVertical && config.vertical_candidate_window) {
+        setConfig(prev => ({
+          ...prev,
+          vertical_candidate_window: {
+            ...prev.vertical_candidate_window!,
+            border_slice_px: slices,
+            border_width_dip: slices
+          }
+        }));
+      } else {
+        setConfig(prev => ({
+          ...prev,
+          candidate_window: {
+            ...prev.candidate_window,
+            border_slice_px: slices,
+            border_width_dip: slices
+          }
+        }));
+      }
     } else if (sliceModalTarget === 'highlight') {
       setConfig(prev => ({
         ...prev,
@@ -230,13 +275,17 @@ export const App: React.FC = () => {
   // 获取标定弹窗需要展示的素材
   const getSliceTargetAsset = () => {
     if (sliceModalTarget === 'background') {
-      const path = config.candidate_window.background_image;
+      const isVertical = layoutMode === 'vertical';
+      const candWin = (isVertical && config.vertical_candidate_window)
+        ? config.vertical_candidate_window
+        : config.candidate_window;
+      const path = candWin.background_image;
       if (!path) return null;
       return {
         path,
         asset: assets.get(path),
-        slices: config.candidate_window.border_slice_px || { top: 4, right: 4, bottom: 4, left: 4 },
-        title: '候选窗口背景'
+        slices: candWin.border_slice_px || { top: 4, right: 4, bottom: 4, left: 4 },
+        title: `候选窗口背景 (${isVertical ? '竖排' : '横排'})`
       };
     }
     if (sliceModalTarget === 'highlight') {
@@ -273,15 +322,19 @@ export const App: React.FC = () => {
       {/* 主体三栏工作台 */}
       <div className="flex-1 flex overflow-hidden">
         {/* 左侧资产库 */}
-        <AssetManager
-          config={config}
-          assets={assets}
-          onAddAsset={handleAddAsset}
-          onSetBackgroundImage={handleSetBackgroundImage}
-          onSetHighlightImage={handleSetHighlightImage}
-          onAddAccessoryFromAsset={handleAddAccessoryFromAsset}
-          onOpenSliceModal={setSliceModalTarget}
-        />
+        <div className="shrink-0 flex h-full">
+          <AssetManager
+            config={config}
+            assets={assets}
+            onAddAsset={handleAddAsset}
+            onSetBackgroundImage={handleSetBackgroundImage}
+            onSetHighlightImage={handleSetHighlightImage}
+            onAddAccessoryFromAsset={handleAddAccessoryFromAsset}
+            onOpenSliceModal={setSliceModalTarget}
+            isDarkMode={isDarkMode}
+            layoutMode={layoutMode}
+          />
+        </div>
 
         {/* 中央高保真仿真画布 */}
         <main className={`flex-1 flex flex-col relative overflow-hidden transition-colors ${
@@ -371,13 +424,17 @@ export const App: React.FC = () => {
         </main>
 
         {/* 右侧属性检查面板 */}
-        <ConfigPanel
-          config={config}
-          onChange={setConfig}
-          selectedAccessoryId={selectedAccessoryId}
-          onSelectAccessory={setSelectedAccessoryId}
-          onRemoveAccessory={handleRemoveAccessory}
-        />
+        <div className="shrink-0 flex h-full">
+          <ConfigPanel
+            config={config}
+            onChange={setConfig}
+            selectedAccessoryId={selectedAccessoryId}
+            onSelectAccessory={setSelectedAccessoryId}
+            onRemoveAccessory={handleRemoveAccessory}
+            isDarkMode={isDarkMode}
+            layoutMode={layoutMode}
+          />
+        </div>
       </div>
 
       {/* 九宫格标定弹窗 */}

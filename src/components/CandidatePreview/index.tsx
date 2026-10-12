@@ -45,7 +45,14 @@ export const CandidatePreview: React.FC<CandidatePreviewProps> = ({
     return alt?.blobUrl || path;
   };
 
-  const candWin = config.candidate_window;
+  const isVertical = layoutMode === 'vertical';
+  const candWin = (isVertical && config.vertical_candidate_window)
+    ? config.vertical_candidate_window
+    : config.candidate_window;
+  const accessories = (isVertical && config.vertical_accessories)
+    ? config.vertical_accessories
+    : (config.accessories || []);
+
   const bgImage = getAssetUrl(candWin.background_image);
   const hlBgImage = getAssetUrl(config.highlight_item?.background_image);
 
@@ -54,15 +61,18 @@ export const CandidatePreview: React.FC<CandidatePreviewProps> = ({
   const windowWidthDip = candWin.border_width_dip;
 
   // 搜狗与传统大背景图常带大立绘或较大原图高度，需保证合理最小高度
-  const minHeightDip = Math.max(
-    layoutMode === 'vertical' ? 120 : 48,
-    (windowWidthDip?.top ?? 0) + (windowWidthDip?.bottom ?? 0) + (layoutMode === 'vertical' ? 70 : 34)
+  const minHeightDip = candWin.min_height_dip ?? Math.max(
+    isVertical ? 120 : 44,
+    (windowWidthDip?.top ?? 0) + (windowWidthDip?.bottom ?? 0) + (isVertical ? 70 : 34)
   );
+
+  const minWidthDip = candWin.min_width_dip;
 
   let windowBgStyle: React.CSSProperties = {
     backgroundColor: candWin.background_color || (bgImage ? 'transparent' : '#ffffff'),
     borderRadius: candWin.corner_radius_dip ? `${candWin.corner_radius_dip}px` : undefined,
     minHeight: `${minHeightDip}px`,
+    ...(minWidthDip ? { minWidth: `${minWidthDip}px` } : {})
   };
 
   if (bgImage) {
@@ -89,12 +99,12 @@ export const CandidatePreview: React.FC<CandidatePreviewProps> = ({
     }
   }
 
-  // 计算内容内边距 (保证边框花纹内部有足够安全的文本呼吸空间)
+  // 计算内容内边距 (根据设置的 margin_dip 从窗口边框向内留白)
   const paddingStyle: React.CSSProperties = {
-    paddingTop: `${(candWin.margin_dip?.top ?? 0) + 6}px`,
-    paddingRight: `${(candWin.margin_dip?.right ?? 0) + 12}px`,
-    paddingBottom: `${(candWin.margin_dip?.bottom ?? 0) + 6}px`,
-    paddingLeft: `${(candWin.margin_dip?.left ?? 0) + 12}px`
+    paddingTop: `${candWin.margin_dip?.top ?? 6}px`,
+    paddingRight: `${candWin.margin_dip?.right ?? 12}px`,
+    paddingBottom: `${candWin.margin_dip?.bottom ?? 6}px`,
+    paddingLeft: `${candWin.margin_dip?.left ?? 12}px`
   };
 
   // 挂件拖拽交互
@@ -143,7 +153,7 @@ export const CandidatePreview: React.FC<CandidatePreviewProps> = ({
         onClick={e => e.stopPropagation()}
       >
         {/* 自由挂件挂载层 (支持任意数量图层，按 z_order 排序渲染) */}
-        {config.accessories?.map(acc => {
+        {accessories.map(acc => {
           const accUrl = getAssetUrl(acc.image);
           if (!accUrl) return null;
 
@@ -223,7 +233,10 @@ export const CandidatePreview: React.FC<CandidatePreviewProps> = ({
                 color: config.preedit?.text_color || '#334155',
                 fontSize: `${(config.preedit?.font_size_pt || 11) * 1.33}px`,
                 fontWeight: config.preedit?.font_weight || 400,
-                marginBottom: `${candWin.line_gap_dip || 6}px`
+                marginBottom: `${candWin.line_gap_dip || 6}px`,
+                transform: config.preedit?.offset_dip
+                  ? `translate(${config.preedit.offset_dip.x}px, ${config.preedit.offset_dip.y}px)`
+                  : undefined
               }}
               className="tracking-wide select-none font-sans"
             >

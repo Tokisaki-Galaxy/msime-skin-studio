@@ -162,18 +162,27 @@ export function parseSogouColor(raw?: string, fallback: string = '#333333'): str
   return fallback;
 }
 
-export function parseSogouMargins(raw?: string): { top: number; right: number; bottom: number; left: number } {
-  if (!raw) return { top: 4, right: 4, bottom: 4, left: 4 };
-  const parts = raw.split(',').map(s => parseInt(s.trim(), 10) || 0);
-  if (parts.length === 4) {
-    return {
-      left: parts[0],
-      right: parts[1],
-      top: parts[2],
-      bottom: parts[3]
-    };
-  }
-  return { top: 4, right: 4, bottom: 4, left: 4 };
+// 解析搜狗 margin: left, top, right, bottom (或 left, right, top, bottom)
+// 在 Scheme_H1 中，顺序严格为 left, top, right, bottom
+function getImageDimensions(dataUri: string): { width: number; height: number } {
+  try {
+    const bin = atob(dataUri.split(',')[1]);
+    if (bin.length > 24) {
+      // PNG check
+      if (bin.charCodeAt(0) === 0x89 && bin.charCodeAt(1) === 0x50 && bin.charCodeAt(2) === 0x4E && bin.charCodeAt(3) === 0x47) {
+        const width = (bin.charCodeAt(16) << 24) | (bin.charCodeAt(17) << 16) | (bin.charCodeAt(18) << 8) | bin.charCodeAt(19);
+        const height = (bin.charCodeAt(20) << 24) | (bin.charCodeAt(21) << 16) | (bin.charCodeAt(22) << 8) | bin.charCodeAt(23);
+        return { width, height };
+      }
+      // BMP check
+      if (bin.charCodeAt(0) === 0x42 && bin.charCodeAt(1) === 0x4D) {
+        const width = bin.charCodeAt(18) | (bin.charCodeAt(19) << 8) | (bin.charCodeAt(20) << 16) | (bin.charCodeAt(21) << 24);
+        const height = Math.abs(bin.charCodeAt(22) | (bin.charCodeAt(23) << 8) | (bin.charCodeAt(24) << 16) | (bin.charCodeAt(25) << 24));
+        return { width, height };
+      }
+    }
+  } catch {}
+  return { width: 0, height: 0 };
 }
 
 export async function processSsfArchive(
@@ -229,13 +238,19 @@ export async function processSsfArchive(
 
   let iniText = '';
   if (iniFile) {
-    try {
-      iniText = new TextDecoder('utf-8', { fatal: true }).decode(iniFile.data);
-    } catch {
+    if (iniFile.data.length >= 2 && iniFile.data[0] === 0xff && iniFile.data[1] === 0xfe) {
+      iniText = new TextDecoder('utf-16le').decode(iniFile.data);
+    } else if (iniFile.data.length >= 3 && iniFile.data[0] === 0xef && iniFile.data[1] === 0xbb && iniFile.data[2] === 0xbf) {
+      iniText = new TextDecoder('utf-8').decode(iniFile.data.subarray(3));
+    } else {
       try {
-        iniText = new TextDecoder('gb18030').decode(iniFile.data);
+        iniText = new TextDecoder('utf-8', { fatal: true }).decode(iniFile.data);
       } catch {
-        iniText = new TextDecoder('utf-16le').decode(iniFile.data);
+        try {
+          iniText = new TextDecoder('gb18030').decode(iniFile.data);
+        } catch {
+          iniText = new TextDecoder('utf-16le').decode(iniFile.data);
+        }
       }
     }
   }
@@ -245,12 +260,6 @@ export async function processSsfArchive(
   const general = parsedIni['General'] || {};
   const display = parsedIni['Display'] || {};
   const schemeH1 = parsedIni['Scheme_H1'] || {};
-
-  // 优先级：Skin_Cand.margin_cand -> Scheme_H1.zhongwen_marge
-  let margins = parseSogouMargins(cand['margin_cand']);
-  if (!cand['margin_cand'] && schemeH1['zhongwen_marge']) {
-    margins = parseSogouMargins(schemeH1['zhongwen_marge']);
-  }
 
   const skinTitle = general['skin_name'] || fileName.replace(/\.ssf$/i, '') || 'Sogou_Port';
 
@@ -278,33 +287,102 @@ export async function processSsfArchive(
     }
   }
 
-  // 探测背景图尺寸以保留搜狗大背景图的自然呼吸高度与内边距
-  let bgHeightPx = 0;
-  if (bgImgFileName && images[bgImgFileName]) {
-    try {
-      const dataUri = images[bgImgFileName];
-      const bin = atob(dataUri.split(',')[1]);
-      if (bgImgFileName.toLowerCase().endsWith('.png') && bin.length > 24) {
-        bgHeightPx = (bin.charCodeAt(20) << 24) | (bin.charCodeAt(21) << 16) | (bin.charCodeAt(22) << 8) | bin.charCodeAt(23);
-      }
-    } catch {}
-  }
+  // 转换搜狗切片或边距到九宫格 border_slice_px
+  // 搜狗 layout_horizontal=mode,left,right
+  // 搜狗 layout_vertical=mode,top,bottom
+  const parseSliceAndInsets = (
+    scheme: Record<string, string>,
+    bgFileName: string
+  ) => {
+    const dims = bgFileName && images[bgFileName] ? getImageDimensions(images[bgFileName]) : { width: 0, height: 0 };
+    const bgW = dims.width;
+    const bgH = dims.height;
 
-  // 如果搜狗配有 zhongwen_marge: left, top, right, bottom 绝对选区
-  let customMarginTop = 0;
-  let customMarginBottom = 0;
-  if (schemeH1['zhongwen_marge']) {
-    const parts = schemeH1['zhongwen_marge'].split(',').map(s => parseInt(s.trim(), 10) || 0);
-    if (parts.length === 4) {
-      // 搜狗: left, top, right, bottom
-      customMarginTop = parts[1];
-      if (bgHeightPx > 0 && parts[3] > 0) {
-        customMarginBottom = Math.max(0, bgHeightPx - (parts[1] + parts[3]));
+    // 解析切片
+    let sliceTop = 4;
+    let sliceRight = 4;
+    let sliceBottom = 4;
+    let sliceLeft = 4;
+
+    if (scheme['layout_horizontal']) {
+      const parts = scheme['layout_horizontal'].split(',').map(s => parseInt(s.trim(), 10) || 0);
+      if (parts.length >= 3) {
+        sliceLeft = Math.max(1, parts[1]);
+        sliceRight = Math.max(1, parts[2]);
+      }
+    }
+    if (scheme['layout_vertical']) {
+      const parts = scheme['layout_vertical'].split(',').map(s => parseInt(s.trim(), 10) || 0);
+      if (parts.length >= 3) {
+        sliceTop = Math.max(1, parts[1]);
+        sliceBottom = Math.max(1, parts[2]);
+      }
+    }
+
+    // 解析中文选区 left, top, right, bottom
+    let insets = { top: sliceTop, right: sliceRight, bottom: sliceBottom, left: sliceLeft };
+    let hasExplicitInsets = false;
+
+    if (scheme['zhongwen_marge']) {
+      const parts = scheme['zhongwen_marge'].split(',').map(s => parseInt(s.trim(), 10) || 0);
+      if (parts.length === 4) {
+        // parts: left, top, right, bottom
+        const padLeft = parts[0];
+        const padTop = parts[1];
+        const padRight = parts[2];
+        let padBottom = parts[3];
+
+        // 如果 bgH 大于 0 且底边距看起来是候选框高度而不是下边界
+        // 在老八和狂三等大图立绘皮肤中，整张图高度远大于 parts[1] + parts[3]
+        if (bgH > 0 && bgH > (padTop + padBottom)) {
+          // 下方留给立绘的自然空白高度
+          padBottom = Math.max(padBottom, bgH - (padTop + 36));
+        }
+
+        insets = {
+          top: Math.max(4, padTop),
+          right: Math.max(4, padRight),
+          bottom: Math.max(4, padBottom),
+          left: Math.max(4, padLeft)
+        };
+        hasExplicitInsets = true;
+      }
+    }
+
+    // 如果切片过小而原图很大，需要保证最小高度防止压扁
+    const minHeight = bgH > 40 ? bgH : undefined;
+    const minWidth = bgW > 80 ? Math.min(bgW, 180) : undefined;
+
+    return {
+      slice: { top: sliceTop, right: sliceRight, bottom: sliceBottom, left: sliceLeft },
+      insets,
+      minHeight,
+      minWidth,
+      bgW,
+      bgH
+    };
+  };
+
+  // 解析横排 H1
+  const h1Parsed = parseSliceAndInsets(schemeH1, bgImgFileName);
+
+  // 解析拼音与中文的相对偏移
+  // 如果 pinyin_marge 存在，比较其与 zhongwen_marge 的 top 和 left 差值
+  let preeditOffset: { x: number; y: number } | undefined = undefined;
+  if (schemeH1['pinyin_marge'] && schemeH1['zhongwen_marge']) {
+    const py = schemeH1['pinyin_marge'].split(',').map(s => parseInt(s.trim(), 10) || 0);
+    const zw = schemeH1['zhongwen_marge'].split(',').map(s => parseInt(s.trim(), 10) || 0);
+    if (py.length === 4 && zw.length === 4) {
+      // py: left, top, right, bottom; zw: left, top, right, bottom
+      const diffX = py[0] - zw[0];
+      const diffY = py[1] - zw[1];
+      if (Math.abs(diffX) > 2 || Math.abs(diffY) > 2) {
+        preeditOffset = { x: diffX, y: diffY };
       }
     }
   }
 
-  // 提取挂件 (Custom accessories)
+  // 提取横排挂件 (Scheme_H1 accessories)
   const accessories: AccessoryStyle[] = [];
   const customCnt = parseInt(schemeH1['custom_cnt'] || '0', 10);
   for (let i = 0; i < customCnt; i++) {
@@ -313,15 +391,55 @@ export async function processSsfArchive(
     if (customPic) {
       const cleanPic = customPic.replace(/\\/g, '/').split('/').pop() || '';
       if (images[cleanPic]) {
+        const accDims = getImageDimensions(images[cleanPic]);
         accessories.push({
-          id: `acc_${i}`,
+          id: `acc_h_${i}`,
           image: `assets/${cleanPic}`,
-          anchor: 'top_left',
+          anchor: 'bottom_right',
           offset_dip: { x: 0, y: 0 },
+          size_dip: accDims.width > 0 && accDims.height > 0 ? { width: accDims.width, height: accDims.height } : undefined,
           z_order: 10 + i
         });
       }
     }
+  }
+
+  // 解析竖排 (Scheme_V1)
+  const schemeV1 = parsedIni['Scheme_V1'] || {};
+  let v1BgFileName = '';
+  if (schemeV1['pic']) {
+    const v1PicName = schemeV1['pic'].replace(/\\/g, '/').split('/').pop() || '';
+    if (images[v1PicName]) {
+      v1BgFileName = v1PicName;
+    }
+  }
+  const v1Parsed = parseSliceAndInsets(schemeV1, v1BgFileName);
+
+  // 提取竖排挂件
+  const verticalAccessories: AccessoryStyle[] = [];
+  const v1CustomCnt = parseInt(schemeV1['custom_cnt'] || '0', 10);
+  for (let i = 0; i < v1CustomCnt; i++) {
+    const picKey = `custom${i}`;
+    const customPic = schemeV1[picKey];
+    if (customPic) {
+      const cleanPic = customPic.replace(/\\/g, '/').split('/').pop() || '';
+      if (images[cleanPic]) {
+        const accDims = getImageDimensions(images[cleanPic]);
+        verticalAccessories.push({
+          id: `acc_v_${i}`,
+          image: `assets/${cleanPic}`,
+          anchor: 'bottom_right',
+          offset_dip: { x: 0, y: 0 },
+          size_dip: accDims.width > 0 && accDims.height > 0 ? { width: accDims.width, height: accDims.height } : undefined,
+          z_order: 10 + i
+        });
+      }
+    }
+  }
+
+  const supportedModes: Array<'horizontal' | 'vertical'> = ['horizontal'];
+  if (v1BgFileName) {
+    supportedModes.push('vertical');
   }
 
   const skinConfig: SkinV2Config = {
@@ -331,27 +449,37 @@ export async function processSsfArchive(
       version: '1.0.0',
       author: general['author'] || general['skin_author'] || '搜狗皮肤转换器',
       description: general['skin_info'] || `从搜狗皮肤 ${fileName} 自动转换而来`,
-      supported_modes: ['horizontal']
+      supported_modes: supportedModes
     },
     candidate_window: {
-      border_slice_px: margins,
-      border_width_dip: margins,
+      border_slice_px: h1Parsed.slice,
+      border_width_dip: h1Parsed.slice,
       scale_mode: 'stretch',
       line_gap_dip: 8,
       item_gap_dip: 12,
       ...(bgImage ? { background_image: bgImage } : {}),
-      ...((customMarginTop > 0 || customMarginBottom > 0) ? {
-        margin_dip: {
-          top: customMarginTop,
-          right: margins.right,
-          bottom: customMarginBottom,
-          left: margins.left
-        }
-      } : {})
+      margin_dip: h1Parsed.insets,
+      ...(h1Parsed.minHeight ? { min_height_dip: h1Parsed.minHeight } : {}),
+      ...(h1Parsed.minWidth ? { min_width_dip: h1Parsed.minWidth } : {})
     },
+    ...(v1BgFileName ? {
+      vertical_candidate_window: {
+        border_slice_px: v1Parsed.slice,
+        border_width_dip: v1Parsed.slice,
+        scale_mode: 'stretch',
+        line_gap_dip: 8,
+        item_gap_dip: 12,
+        background_image: `assets/${v1BgFileName}`,
+        margin_dip: v1Parsed.insets,
+        ...(v1Parsed.minHeight ? { min_height_dip: v1Parsed.minHeight } : {}),
+        ...(v1Parsed.minWidth ? { min_width_dip: v1Parsed.minWidth } : {})
+      },
+      vertical_accessories: verticalAccessories
+    } : {}),
     preedit: {
       text_color: parseSogouColor(cand['py_color'] || display['pinyin_color'], '#334155'),
-      font_size_pt: parseInt(display['font_size'] || '11', 10) ? Math.min(16, Math.max(9, Math.round(parseInt(display['font_size'] || '11', 10) * 0.75))) : 11
+      font_size_pt: parseInt(display['font_size'] || '11', 10) ? Math.min(16, Math.max(9, Math.round(parseInt(display['font_size'] || '11', 10) * 0.75))) : 11,
+      ...(preeditOffset ? { offset_dip: preeditOffset } : {})
     },
     candidate_item: {
       text_color: parseSogouColor(cand['cand_color'] || display['zhongwen_color'], '#0f172a'),

@@ -225,11 +225,13 @@ const SHADOWS = ['none', 'soft', 'strong'];
 const ALIGNS = ['left', 'center', 'right'];
 const FITS = ['cover', 'contain', 'stretch'];
 
-/** 对应 IsSafeId：非空、≤64、首字符是字母或数字、其余只含 [a-z0-9._-]。 */
-export function isValidSkinId(id: string): boolean {
+/** 对应 server/src/skin/candidate_skin_catalog.cpp 的 IsSafeId：非空、≤64、
+    首字符是字母或数字、其余只含 [a-z0-9._-]。首字符与其余部分都只收小写，
+    水杉的 std::islower 拒收大写。 */
+export function isSafeSkinId(id: string): boolean {
   if (!id || id.length > 64) return false;
-  if (!/^[a-z0-9]/i.test(id[0])) return false;
-  return /^[a-z0-9._-]+$/i.test(id);
+  if (!/^[a-z0-9]/.test(id)) return false;
+  return /^[a-z0-9._-]+$/.test(id);
 }
 
 /** 对应 ReadString 的长度与必填判定。 */
@@ -420,10 +422,11 @@ export function validateSkinConfig(config: SkinV2Config): SkinValidationIssue[] 
 
   checkString(issues, 'id', meta.id, 64, true);
   if (typeof meta.id === 'string' && meta.id.length > 0) {
-    // 与 IsSafeId 一致：首字符必须是字母或数字，其余只含小写字母、数字与 . _ -
-    if (!/^[a-z0-9]/i.test(meta.id[0])) {
+    // 与 IsSafeId 一致：首字符必须是字母或数字，其余只含小写字母、数字与 . _ -。
+    // 这里不能加 /i：水杉的 std::islower 拒收大写，带了 i 会让 BadID 通过本地校验却在加载时失败。
+    if (!/^[a-z0-9]/.test(meta.id)) {
       issues.push({ field: 'id', message: 'id 必须以小写字母或数字开头' });
-    } else if (!/^[a-z0-9._-]+$/i.test(meta.id)) {
+    } else if (!/^[a-z0-9._-]+$/.test(meta.id)) {
       issues.push({ field: 'id', message: 'id 只能包含小写字母、数字和 . _ -' });
     }
   }

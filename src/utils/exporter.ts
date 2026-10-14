@@ -1,13 +1,8 @@
 import JSZip from 'jszip';
 import { SkinV2Config, SkinAsset } from '../types/skin';
-import { serializeSkinToml, validateSkinConfig } from './toml';
+import { serializeSkinToml, validateSkinConfig, isSafeSkinId } from './toml';
 
-/** 与 server/src/skin/candidate_skin_catalog.cpp 的 IsSafeId 一致。 */
-export function isSafeSkinId(id: string): boolean {
-  if (!id || id.length > 64) return false;
-  if (!/^[a-z0-9]/.test(id)) return false;
-  return /^[a-z0-9._-]+$/.test(id);
-}
+export { isSafeSkinId };
 
 export async function exportSkinPackage(config: SkinV2Config, assets: Map<string, SkinAsset>): Promise<Blob> {
   const id = config.meta.id;

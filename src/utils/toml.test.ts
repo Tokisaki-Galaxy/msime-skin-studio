@@ -127,6 +127,18 @@ describe('id 与颜色', () => {
     expect(isSafeSkinId('')).toBe(false);
   });
 
+  it('validateSkinConfig 和大写 id 也会拦下', () => {
+    // 曾经这里的正则带了 /i，BadID 能过本地校验却在加载时被水杉拒收。
+    const cfg: SkinV2Config = {
+      meta: { schema_version: 2, id: 'BadID', name: 'X', version: '1', base: 'fluent', supports: { layouts: ['horizontal'], themes: ['dark'] } },
+      candidate_window: {},
+      candidate: {}
+    };
+    const issues = validateSkinConfig(cfg);
+    expect(issues.some(i => i.field === 'id')).toBe(true);
+    expect(validateSkinConfig({ ...cfg, meta: { ...cfg.meta, id: 'good_id' } }).some(i => i.field === 'id')).toBe(false);
+  });
+
   it('搜狗中文名退化成不撞车的 id', () => {
     expect(safeSkinId('航海')).toMatch(/^sogou_skin_[0-9a-f]+$/);
     expect(safeSkinId('航海')).toBe(safeSkinId('航海'));

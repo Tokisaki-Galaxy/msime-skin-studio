@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   BUILT_IN_SKINS,
   BUILT_IN_SKIN_LABELS,
@@ -9,6 +9,7 @@ import {
   SkinV2Config,
   ThemeName
 } from '../../types/skin';
+import { extractAlpha, hexToRgba, toOpaqueHex } from '../../utils/color';
 
 type Decoration = NonNullable<SkinV2Config['candidate_window']['decorations']>[number];
 
@@ -66,25 +67,55 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
     });
   };
 
+  // 色块的取值与文本框分开存。带 alpha 的原始值（#rrggbbaa / rgba()）只走文本框，
+  // 绝不经过 <input type="color">，否则 React 在 commit 阶段会把原值写进节点，
+  // 浏览器判定格式非法并刷一屏 "does not conform to the required format"。
+  const [draftColor, setDraftColor] = useState<Record<string, string>>({});
+  const [draftSwatch, setDraftSwatch] = useState<Record<string, string>>({});
+
   const colorInput = (theme: ThemeName, key: keyof CandidateColors, label: string, fallback: string) => {
     const value = (config.candidate[theme]?.[key] as string) ?? '';
+    const fieldId = `${theme}.${String(key)}`;
+    const shown = draftColor[fieldId] ?? value;
+    // 文本框是权威来源，原样保留 rgba() / #rrggbbaa 里的透明度。
+    const alpha = extractAlpha(shown);
+    const swatch = draftSwatch[fieldId] ?? toOpaqueHex(shown, fallback);
     return (
       <div>
         <label className={labelCls}>{label}</label>
         <div className="flex gap-2 items-center mt-1">
           <input
             type="color"
-            value={value || fallback}
-            onChange={e => updateColor(theme, key, e.target.value)}
+            value={swatch}
+            title="只能调 RGB，透明度请在右侧文本框里用 rgba() 或 #rrggbbaa 写"
+            onChange={e => {
+              // 色块只会给出 #rrggbb，这里把原来的 alpha 补回去，避免改个色就把透明度抹掉。
+              const picked = e.target.value;
+              setDraftSwatch(prev => ({ ...prev, [fieldId]: picked }));
+              const next = alpha < 1 ? hexToRgba(picked, alpha) : picked;
+              setDraftColor(prev => ({ ...prev, [fieldId]: next }));
+              updateColor(theme, key, next);
+            }}
             className={`w-7 h-7 rounded border bg-transparent cursor-pointer ${isDarkMode ? 'border-slate-700' : 'border-slate-300'}`}
           />
           <input
             type="text"
-            value={value}
+            value={shown}
             placeholder="留空沿用 base"
-            onChange={e => updateColor(theme, key, e.target.value || undefined)}
-            className={`flex-1 ${fieldCls(isDarkMode)} mt-0`}
+            onChange={e => {
+              const text = e.target.value;
+              setDraftColor(prev => ({ ...prev, [fieldId]: text }));
+              // 文本框是唯一能表达透明度的入口，色块跟着它的 RGB 走。
+              setDraftSwatch(prev => {
+                const next = { ...prev };
+                delete next[fieldId];
+                return next;
+              });
+              updateColor(theme, key, text || undefined);
+            }}
+            className={`flex-1 ${fieldCls(isDarkMode)} mt-0 font-mono`}
           />
+          {alpha < 1 && <span className={`text-[10px] shrink-0 ${labelCls}`}>透明度 {Math.round(alpha * 100)}%</span>}
         </div>
       </div>
     );

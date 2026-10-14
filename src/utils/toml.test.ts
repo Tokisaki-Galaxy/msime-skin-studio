@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { parseSkinToml, parseToml, serializeSkinToml } from './toml';
+import { parseSkinToml, parseToml, serializeSkinToml, validateSkinConfig } from './toml';
 import { SKIN_TEMPLATES } from '../constants/templates';
+import { SkinV2Config } from '../types/skin';
 import { isSafeSkinId } from './exporter';
-import { parseSogouColor, safeSkinId } from './ssf';
+import { getImageDimensions, extractEncryptedSkin, parseSogouColor, parseIni, safeSkinId } from './ssf';
 import { buildSkinOverrideCss } from './skinCss';
 
 const urlFor = (p: string) => `blob:${p}`;
@@ -138,5 +139,148 @@ describe('id 与颜色', () => {
     expect(parseSogouColor('0x637af4')).toBe('#f47a63');
     expect(parseSogouColor('0xe9a000')).toBe('#00a0e9');
     expect(parseSogouColor(undefined, '#123456')).toBe('#123456');
+  });
+});
+
+describe('图片尺寸探测', () => {
+  const gif = (w: number, h: number) => {
+    const bytes = [0x47, 0x49, 0x46, 0x38, 0x39, 0x61, w & 0xff, (w >> 8) & 0xff, h & 0xff, (h >> 8) & 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    return 'data:image/gif;base64,' + btoa(String.fromCharCode(...bytes));
+  };
+  const png = (w: number, h: number) => {
+    const bytes = new Array(28).fill(0);
+    bytes[0] = 0x89;
+    bytes[1] = 0x50;
+    bytes[2] = 0x4e;
+    bytes[3] = 0x47;
+    bytes[16] = (w >> 24) & 0xff;
+    bytes[17] = (w >> 16) & 0xff;
+    bytes[18] = (w >> 8) & 0xff;
+    bytes[19] = w & 0xff;
+    bytes[20] = (h >> 24) & 0xff;
+    bytes[21] = (h >> 16) & 0xff;
+    bytes[22] = (h >> 8) & 0xff;
+    bytes[23] = h & 0xff;
+    return 'data:image/png;base64,' + btoa(String.fromCharCode(...bytes));
+  };
+  const bmp = (w: number, h: number) => {
+    const bytes = new Array(28).fill(0);
+    bytes[0] = 0x42;
+    bytes[1] = 0x4d;
+    bytes[18] = w & 0xff;
+    bytes[19] = (w >> 8) & 0xff;
+    bytes[20] = (w >> 16) & 0xff;
+    bytes[21] = (w >> 24) & 0xff;
+    bytes[22] = h & 0xff;
+    bytes[23] = (h >> 8) & 0xff;
+    bytes[24] = (h >> 16) & 0xff;
+    bytes[25] = (h >> 24) & 0xff;
+    return 'data:image/bmp;base64,' + btoa(String.fromCharCode(...bytes));
+  };
+
+  it('GIF 也能拿到尺寸，否则挂件会被算成 0x0', () => {
+    // 仲夏梦之夜的 oh_custom01.gif 实际是 87x80
+    expect(getImageDimensions(gif(87, 80))).toEqual({ width: 87, height: 80 });
+    expect(getImageDimensions(gif(1, 1))).toEqual({ width: 1, height: 1 });
+  });
+
+  it('PNG 与 BMP 仍然正确', () => {
+    expect(getImageDimensions(png(255, 130))).toEqual({ width: 255, height: 130 });
+    expect(getImageDimensions(bmp(29, 142))).toEqual({ width: 29, height: 142 });
+  });
+
+  it('认不出的格式返回 0 而不是抛错', () => {
+    expect(getImageDimensions('data:image/webp;base64,' + btoa('RIFFxxxxWEBP'))).toEqual({ width: 0, height: 0 });
+    expect(getImageDimensions('data:image/png;base64,')).toEqual({ width: 0, height: 0 });
+  });
+});
+
+describe('skin.toml 校验', () => {
+  const clone = (config: SkinV2Config): SkinV2Config => JSON.parse(JSON.stringify(config));
+  const fields = (config: SkinV2Config) => validateSkinConfig(config).map(issue => issue.field);
+
+  it('三套模板都是合法皮肤', () => {
+    for (const tpl of SKIN_TEMPLATES) {
+      expect(validateSkinConfig(clone(tpl.config))).toEqual([]);
+    }
+  });
+
+  it('name 为空要报 name', () => {
+    const cfg = clone(SKIN_TEMPLATES[0].config);
+    cfg.meta.name = '';
+    expect(fields(cfg)).toContain('name');
+  });
+
+  it('font_family 含逗号要报 font_family', () => {
+    const cfg = clone(SKIN_TEMPLATES[0].config);
+    cfg.candidate_window.font_family = 'Microsoft YaHei, sans-serif';
+    expect(fields(cfg)).toContain('candidate_window.font_family');
+  });
+
+  it('颜色含中文或分号要报对应颜色字段', () => {
+    const chinese = clone(SKIN_TEMPLATES[0].config);
+    chinese.candidate!.dark!.surface = '深色背景';
+    expect(fields(chinese)).toContain('candidate.dark.surface');
+
+    const semicolon = clone(SKIN_TEMPLATES[0].config);
+    semicolon.candidate!.light!.text = '#fff;}body{';
+    expect(fields(semicolon)).toContain('candidate.light.text');
+  });
+
+  it('slice_dip 长度为 3 要报 slice_dip', () => {
+    const cfg = clone(SKIN_TEMPLATES[1].config);
+    cfg.candidate_window.border_image!.slice_dip = [16, 16, 16];
+    expect(fields(cfg)).toContain('candidate_window.border_image.slice_dip');
+  });
+
+  it('slice_dip 有一项 501 要报 slice_dip', () => {
+    const cfg = clone(SKIN_TEMPLATES[1].config);
+    cfg.candidate_window.border_image!.slice_dip = [16, 501, 16, 16];
+    expect(fields(cfg)).toContain('candidate_window.border_image.slice_dip');
+  });
+
+  it('decorations 的 height_dip 为 0 要报该项', () => {
+    const cfg = clone(SKIN_TEMPLATES[1].config);
+    cfg.candidate_window.decorations![0].height_dip = 0;
+    expect(fields(cfg)).toContain('candidate_window.decorations[0].height_dip');
+  });
+
+  it('supports.layouts 为空数组要报 supports.layouts', () => {
+    const cfg = clone(SKIN_TEMPLATES[0].config);
+    cfg.meta.supports!.layouts = [];
+    expect(fields(cfg)).toContain('supports.layouts');
+  });
+
+  it('content_insets_dip.top 为 -1 要报该项', () => {
+    const cfg = clone(SKIN_TEMPLATES[1].config);
+    cfg.candidate_window.content_insets_dip!.top = -1;
+    expect(fields(cfg)).toContain('candidate_window.content_insets_dip.top');
+  });
+});
+
+describe('搜狗 ini 解析', () => {
+  it('分节与键值对', () => {
+    const ini = parseIni('[Scheme_H1]\r\npic=skin1.png\r\nlayout_horizontal=0,301,92\r\n\r\n[Display]\r\nfont_size=32\r\n');
+    expect(ini['Scheme_H1'].pic).toBe('skin1.png');
+    expect(ini['Scheme_H1'].layout_horizontal).toBe('0,301,92');
+    expect(ini['Display'].font_size).toBe('32');
+  });
+
+  it('忽略注释与空行', () => {
+    const ini = parseIni('; 注释\n# 也当注释\n[A]\nk = v\n');
+    expect(ini['A']).toEqual({ k: 'v' });
+  });
+});
+
+describe('加密皮肤解包的边界', () => {
+  it('文件太小时给出可读错误而不是崩', () => {
+    expect(() => extractEncryptedSkin(new Uint8Array(4))).toThrow(/太小/);
+    expect(() => extractEncryptedSkin(new Uint8Array(12))).toThrow(/太小/);
+  });
+
+  it('密钥对不上时明确说是解密失败，不要把 zlib 报错透出去', () => {
+    const junk = new Uint8Array(64);
+    junk.fill(0xab);
+    expect(() => extractEncryptedSkin(junk)).toThrow(/无法解密/);
   });
 });

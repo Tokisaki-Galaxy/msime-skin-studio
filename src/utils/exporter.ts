@@ -1,6 +1,6 @@
 import JSZip from 'jszip';
 import { SkinV2Config, SkinAsset } from '../types/skin';
-import { serializeSkinToml } from './toml';
+import { serializeSkinToml, validateSkinConfig } from './toml';
 
 /** 与 server/src/skin/candidate_skin_catalog.cpp 的 IsSafeId 一致。 */
 export function isSafeSkinId(id: string): boolean {
@@ -20,6 +20,13 @@ export async function exportSkinPackage(config: SkinV2Config, assets: Map<string
 
   const zip = new JSZip();
   const root = zip.folder(id) as JSZip;
+
+  // 水杉的 Load() 是硬校验：任何一条不过整份皮肤都加载不了，没有回退。打包前先自己拦一道。
+  const issues = validateSkinConfig(config);
+  if (issues.length > 0) {
+    const detail = issues.map(issue => `· ${issue.field}：${issue.message}`).join('\n');
+    throw new Error(`皮肤配置不合法，导出后水杉无法加载：\n${detail}`);
+  }
 
   root.file('skin.toml', serializeSkinToml(config));
 

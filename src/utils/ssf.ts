@@ -21,6 +21,9 @@ export interface UnpackedFile {
  * 解密搜狗 Skin 加密格式
  */
 export function extractEncryptedSkin(bytes: Uint8Array): UnpackedFile[] {
+  if (bytes.length <= 12) {
+    throw new Error('文件太小，不是有效的搜狗加密皮肤');
+  }
   const encryptedPayload = bytes.subarray(8);
 
   const keyWords = CryptoJS.enc.Hex.parse(AES_KEY_HEX);
@@ -43,27 +46,56 @@ export function extractEncryptedSkin(bytes: Uint8Array): UnpackedFile[] {
     { iv: ivWords, mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7 }
   );
 
+  // 密钥对不上时 CryptoJS 返回 0 字节，直接喂给 pako 只会得到一句看不懂的 zlib 报错。
+  if (decrypted.sigBytes < 8) {
+    throw new Error('无法解密该皮肤，可能不是搜狗加密皮肤，或文件已损坏');
+  }
+
   const decryptedBytes = new Uint8Array(decrypted.sigBytes);
   for (let i = 0; i < decrypted.sigBytes; i++) {
     decryptedBytes[i] = (decrypted.words[i >>> 2] >>> (24 - (i % 4) * 8)) & 0xff;
   }
 
-  const uncompressed = pako.inflate(decryptedBytes.subarray(4));
+  let uncompressed: Uint8Array;
+  try {
+    // decrypted[0..4) 是头，压缩流从第 4 字节开始。
+    uncompressed = pako.inflate(decryptedBytes.subarray(4));
+  } catch {
+    throw new Error('皮肤内容解压失败，文件可能已损坏');
+  }
 
   // [0..4): total_size  [4..8): hdr_size  [8..8+hdr_size): offsets
+  if (uncompressed.byteLength < 8) {
+    throw new Error('皮肤目录结构不完整');
+  }
   const view = new DataView(uncompressed.buffer, uncompressed.byteOffset, uncompressed.byteLength);
   const hdrSize = view.getUint32(4, true);
+  if (hdrSize === 0 || hdrSize % 4 !== 0 || 8 + hdrSize > uncompressed.byteLength) {
+    throw new Error('皮肤目录头部长度非法');
+  }
   const numOffsets = hdrSize / 4;
 
+  // 下面是逐条读目录项。偏移量与长度全部来自文件，任何一处越界都可能让 subarray 读空
+  // 或者让 TextDecoder 吃到巨量数据，所以每个取值都要先落到缓冲区内再使用。
+  const total = uncompressed.byteLength;
   const files: UnpackedFile[] = [];
   for (let i = 0; i < numOffsets; i++) {
     const off = view.getUint32(8 + i * 4, true);
+    if (off + 4 > total) {
+      throw new Error(`皮肤目录项 ${i} 的偏移越界`);
+    }
     const nameLen = view.getUint32(off, true);
+    if (nameLen > 1024 || off + 4 + nameLen + 4 > total) {
+      throw new Error(`皮肤目录项 ${i} 的文件名长度非法`);
+    }
     const nameBytes = uncompressed.subarray(off + 4, off + 4 + nameLen);
     const name = new TextDecoder('utf-16le').decode(nameBytes);
 
     const contentLenOff = off + 4 + nameLen;
     const contentLen = view.getUint32(contentLenOff, true);
+    if (contentLenOff + 4 + contentLen > total) {
+      throw new Error(`皮肤目录项 ${i} 的内容长度越界`);
+    }
     const fileBytes = uncompressed.subarray(contentLenOff + 4, contentLenOff + 4 + contentLen);
 
     files.push({ name, data: new Uint8Array(fileBytes) });
@@ -136,18 +168,45 @@ export function parseSogouColor(raw?: string, fallback?: string): string | undef
   return fallback;
 }
 
-function getImageDimensions(dataUri: string): { width: number; height: number } {
+/**
+ * 转 base64。不能写成 `binary += String.fromCharCode(byte)` 那种逐字节拼接，
+ * 单张皮肤贴图动辄几百 KB 到几 MB，逐字节拼会构造超长中间字符串，直接把主线程卡住。
+ * 这里按块处理，每块用 apply 一次性展开，块大小取 0x8000 以免超过调用参数上限。
+ */
+function bytesToBase64(bytes: Uint8Array): string {
+  const CHUNK = 0x8000;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+/**
+ * 只读图片头部拿宽高。水杉两端都支持 GIF：WebView2 播放动图，D2D 用 WIC 解出静态首帧
+ * （ui/src/DeviceResources.cpp 的 GetBitmapFromFile 取 GetFrame(0)）。所以 GIF 必须能拿到尺寸，
+ * 否则挂件宽度算成 0，渲染出来就是看不见。
+ */
+export function getImageDimensions(dataUri: string): { width: number; height: number } {
   try {
     const bin = atob(dataUri.split(',')[1]);
-    if (bin.length > 24) {
+    if (bin.length > 26) {
+      // PNG：IHDR 的宽高在固定偏移
       if (bin.charCodeAt(0) === 0x89 && bin.charCodeAt(1) === 0x50) {
         const width = (bin.charCodeAt(16) << 24) | (bin.charCodeAt(17) << 16) | (bin.charCodeAt(18) << 8) | bin.charCodeAt(19);
         const height = (bin.charCodeAt(20) << 24) | (bin.charCodeAt(21) << 16) | (bin.charCodeAt(22) << 8) | bin.charCodeAt(23);
         return { width, height };
       }
+      // BMP：小端 32 位
       if (bin.charCodeAt(0) === 0x42 && bin.charCodeAt(1) === 0x4d) {
         const width = bin.charCodeAt(18) | (bin.charCodeAt(19) << 8) | (bin.charCodeAt(20) << 16) | (bin.charCodeAt(21) << 24);
         const height = Math.abs(bin.charCodeAt(22) | (bin.charCodeAt(23) << 8) | (bin.charCodeAt(24) << 16) | (bin.charCodeAt(25) << 24));
+        return { width, height };
+      }
+      // GIF：逻辑屏幕描述符紧跟 6 字节签名与 3 字节版本，宽高都是小端 16 位
+      if (bin.charCodeAt(0) === 0x47 && bin.charCodeAt(1) === 0x49 && bin.charCodeAt(2) === 0x46) {
+        const width = bin.charCodeAt(6) | (bin.charCodeAt(7) << 8);
+        const height = bin.charCodeAt(8) | (bin.charCodeAt(9) << 8);
         return { width, height };
       }
     }
@@ -244,9 +303,7 @@ export async function processSsfArchive(arrayBuffer: ArrayBuffer, fileName: stri
         : lower.endsWith('.bmp')
         ? 'image/bmp'
         : 'image/jpeg';
-      let binary = '';
-      for (let i = 0; i < file.data.byteLength; i++) binary += String.fromCharCode(file.data[i]);
-      images[cleanName] = `data:${mime};base64,${btoa(binary)}`;
+      images[cleanName] = `data:${mime};base64,${bytesToBase64(file.data)}`;
     }
   }
 
@@ -428,8 +485,10 @@ export async function processSsfArchive(arrayBuffer: ArrayBuffer, fileName: stri
       ...(decorations.length > 0 ? { decorations } : {})
     },
     candidate: {
-      dark: colors,
-      light: colors
+      // 搜狗只有一个 Display 配色，深浅两套先给相同的值，但必须是两份独立对象，
+      // 否则在编辑器里改深色会连带把浅色一起改掉。
+      dark: { ...colors },
+      light: { ...colors }
     }
   };
 

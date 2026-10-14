@@ -1,400 +1,452 @@
 import React from 'react';
-import { SkinV2Config, AccessoryAnchor } from '../../types/skin';
+import {
+  BUILT_IN_SKINS,
+  BUILT_IN_SKIN_LABELS,
+  BuiltInSkin,
+  CandidateColors,
+  DECORATION_ANCHORS,
+  DecorationAnchor,
+  SkinV2Config,
+  ThemeName
+} from '../../types/skin';
+
+type Decoration = NonNullable<SkinV2Config['candidate_window']['decorations']>[number];
 
 interface ConfigPanelProps {
   config: SkinV2Config;
   onChange: (newConfig: SkinV2Config) => void;
-  selectedAccessoryId: string | null;
-  onSelectAccessory: (id: string | null) => void;
-  onRemoveAccessory: (id: string) => void;
+  selectedDecorationIndex: number | null;
+  onSelectDecoration: (index: number | null) => void;
+  onRemoveDecoration: (index: number) => void;
+  onUpdateDecoration: (index: number, patch: Partial<Decoration>) => void;
   isDarkMode?: boolean;
   layoutMode?: 'horizontal' | 'vertical';
 }
 
+const fieldCls = (dark: boolean) =>
+  `w-full rounded px-2.5 py-1 mt-1 outline-none border focus:border-emerald-500 ${
+    dark ? 'bg-slate-800 border-slate-700 text-slate-100' : 'bg-white border-slate-200 text-slate-800'
+  }`;
+
+const labelClsFor = (dark: boolean) => (dark ? 'text-slate-400' : 'text-slate-500');
+
 export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   config,
   onChange,
-  selectedAccessoryId,
-  onSelectAccessory,
-  onRemoveAccessory,
-  isDarkMode = false,
-  layoutMode = 'horizontal'
+  selectedDecorationIndex,
+  onSelectDecoration,
+  onRemoveDecoration,
+  onUpdateDecoration,
+  isDarkMode = false
 }) => {
-  const isVertical = layoutMode === 'vertical';
-  const candWin = (isVertical && config.vertical_candidate_window)
-    ? config.vertical_candidate_window
-    : config.candidate_window;
-  const accessoriesList = (isVertical && config.vertical_accessories && config.vertical_accessories.length > 0)
-    ? config.vertical_accessories
-    : (config.accessories || []);
+  const cw = config.candidate_window;
+  const decorations = cw.decorations ?? [];
+  const selected = selectedDecorationIndex !== null ? decorations[selectedDecorationIndex] : undefined;
 
-  const updateMeta = (field: string, val: any) => {
+  const inputCls = fieldCls(isDarkMode);
+  const labelCls = labelClsFor(isDarkMode);
+  const headingCls = `text-xs font-semibold uppercase tracking-wider ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`;
+  const subPanelCls = `space-y-2 text-xs p-3 rounded-lg border ${
+    isDarkMode ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50 border-slate-200'
+  }`;
+
+  const updateWindow = (patch: Partial<SkinV2Config['candidate_window']>) => {
+    onChange({ ...config, candidate_window: { ...cw, ...patch } });
+  };
+
+  const updateMeta = (patch: Partial<SkinV2Config['meta']>) => {
+    onChange({ ...config, meta: { ...config.meta, ...patch } });
+  };
+
+  const updateColor = (theme: ThemeName, key: keyof CandidateColors, value: string | boolean | undefined) => {
+    const current = config.candidate[theme] || {};
     onChange({
       ...config,
-      meta: { ...config.meta, [field]: val }
+      candidate: { ...config.candidate, [theme]: { ...current, [key]: value } }
     });
   };
 
-  const updateCandidateWindow = (field: string, val: any) => {
-    if (isVertical) {
-      onChange({
-        ...config,
-        vertical_candidate_window: {
-          ...(config.vertical_candidate_window || config.candidate_window),
-          [field]: val
-        }
-      });
-    } else {
-      onChange({
-        ...config,
-        candidate_window: { ...config.candidate_window, [field]: val }
-      });
-    }
+  const colorInput = (theme: ThemeName, key: keyof CandidateColors, label: string, fallback: string) => {
+    const value = (config.candidate[theme]?.[key] as string) ?? '';
+    return (
+      <div>
+        <label className={labelCls}>{label}</label>
+        <div className="flex gap-2 items-center mt-1">
+          <input
+            type="color"
+            value={value || fallback}
+            onChange={e => updateColor(theme, key, e.target.value)}
+            className={`w-7 h-7 rounded border bg-transparent cursor-pointer ${isDarkMode ? 'border-slate-700' : 'border-slate-300'}`}
+          />
+          <input
+            type="text"
+            value={value}
+            placeholder="留空沿用 base"
+            onChange={e => updateColor(theme, key, e.target.value || undefined)}
+            className={`flex-1 ${fieldCls(isDarkMode)} mt-0`}
+          />
+        </div>
+      </div>
+    );
   };
-
-  const updatePreedit = (field: string, val: any) => {
-    onChange({
-      ...config,
-      preedit: { ...(config.preedit || {}), [field]: val }
-    });
-  };
-
-  const updateCandidateItem = (field: string, val: any) => {
-    onChange({
-      ...config,
-      candidate_item: { ...(config.candidate_item || {}), [field]: val }
-    });
-  };
-
-  const updateHighlightItem = (field: string, val: any) => {
-    onChange({
-      ...config,
-      highlight_item: { ...(config.highlight_item || {}), [field]: val }
-    });
-  };
-
-  const updateAccessory = (id: string, field: string, val: any) => {
-    if (isVertical && config.vertical_accessories && config.vertical_accessories.some(a => a.id === id)) {
-      const nextAcc = config.vertical_accessories.map(acc => {
-        if (acc.id === id) {
-          return { ...acc, [field]: val };
-        }
-        return acc;
-      });
-      onChange({ ...config, vertical_accessories: nextAcc });
-    } else {
-      const nextAcc = (config.accessories || []).map(acc => {
-        if (acc.id === id) {
-          return { ...acc, [field]: val };
-        }
-        return acc;
-      });
-      onChange({ ...config, accessories: nextAcc });
-    }
-  };
-
-  const selectedAcc = accessoriesList.find(a => a.id === selectedAccessoryId);
 
   return (
-    <div className={`flex flex-col h-full border-l w-84 select-none overflow-y-auto transition-colors ${
-      isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-800'
-    }`}>
-      {/* 选项卡标题 */}
-      <div className={`p-4 border-b transition-colors ${
-        isDarkMode ? 'border-slate-800' : 'border-slate-100'
-      }`}>
-        <h2 className="text-sm font-semibold">样式与属性微调</h2>
-        <p className="text-[11px] text-slate-400 mt-0.5">即时调整字体、色值、间距与挂件参数</p>
+    <div className={`flex flex-col h-full border-l w-full min-w-0 select-none overflow-y-auto ${isDarkMode ? 'bg-slate-900 border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-800'}`}>
+      <div className={`p-4 border-b ${isDarkMode ? 'border-slate-800' : 'border-slate-100'}`}>
+        <h2 className="text-sm font-semibold">皮肤属性</h2>
+        <p className={`text-[11px] mt-0.5 ${labelCls}`}>字段与 skin.toml 一一对应</p>
       </div>
 
       <div className="p-4 space-y-6">
         {/* 元数据 */}
-        <div className="space-y-3">
-          <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-            皮肤元数据
-          </h3>
+        <section className="space-y-3">
+          <h3 className={headingCls}>皮肤元数据</h3>
           <div className="space-y-2 text-xs">
             <div>
-              <label className="text-slate-400">皮肤名称</label>
+              <label className={labelCls}>id（必须与皮肤目录名一致，只能小写字母数字与 . _ -）</label>
               <input
                 type="text"
-                value={config.meta.name}
-                onChange={e => updateMeta('name', e.target.value)}
-                className="w-full bg-slate-800 border border-slate-700 rounded px-2.5 py-1 text-slate-100 mt-1 focus:border-emerald-500 outline-none"
+                value={config.meta.id}
+                onChange={e => updateMeta({ id: e.target.value })}
+                className={`${inputCls} font-mono`}
               />
             </div>
             <div>
-              <label className="text-slate-400">作者</label>
-              <input
-                type="text"
-                value={config.meta.author}
-                onChange={e => updateMeta('author', e.target.value)}
-                className="w-full bg-slate-800 border border-slate-700 rounded px-2.5 py-1 text-slate-100 mt-1 focus:border-emerald-500 outline-none"
-              />
+              <label className={labelCls}>名称</label>
+              <input type="text" value={config.meta.name} onChange={e => updateMeta({ name: e.target.value })} className={inputCls} />
             </div>
-            <div>
-              <label className="text-slate-400">说明描述</label>
-              <input
-                type="text"
-                value={config.meta.description}
-                onChange={e => updateMeta('description', e.target.value)}
-                className="w-full bg-slate-800 border border-slate-700 rounded px-2.5 py-1 text-slate-100 mt-1 focus:border-emerald-500 outline-none"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* 窗口几何与间距 */}
-        <div className="space-y-3">
-          <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-            窗口与间距布局 ({isVertical ? '竖排' : '横排'})
-          </h3>
-          <div className="space-y-3 text-xs">
-            <div>
-              <label className="text-slate-400 flex justify-between">
-                <span>窗口圆角 (Corner Radius)</span>
-                <span>{candWin.corner_radius_dip || 0}px</span>
-              </label>
-              <input
-                type="range"
-                min="0"
-                max="32"
-                value={candWin.corner_radius_dip || 0}
-                onChange={e => updateCandidateWindow('corner_radius_dip', Number(e.target.value))}
-                className="w-full h-1 bg-slate-700 rounded appearance-none accent-emerald-500 mt-1.5"
-              />
-            </div>
-
-            <div>
-              <label className="text-slate-400 flex justify-between">
-                <span>候选词间距 (Item Gap)</span>
-                <span>{candWin.item_gap_dip || 12}px</span>
-              </label>
-              <input
-                type="range"
-                min="4"
-                max="36"
-                value={candWin.item_gap_dip || 12}
-                onChange={e => updateCandidateWindow('item_gap_dip', Number(e.target.value))}
-                className="w-full h-1 bg-slate-700 rounded appearance-none accent-emerald-500 mt-1.5"
-              />
-            </div>
-
-            <div>
-              <div className="flex justify-between text-slate-400">
-                <label>窗口最小高度 (Min Height)</label>
-                <span className="font-mono">{candWin.min_height_dip ?? 0}px</span>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="500"
-                value={candWin.min_height_dip ?? 0}
-                onChange={e => updateCandidateWindow('min_height_dip', Number(e.target.value))}
-                className="w-full h-1 bg-slate-700 rounded appearance-none accent-emerald-500 mt-1.5"
-              />
-            </div>
-
-            <div>
-              <div className="flex justify-between text-slate-400">
-                <label>窗口最小宽度 (Min Width)</label>
-                <span className="font-mono">{candWin.min_width_dip ?? 0}px</span>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="600"
-                value={candWin.min_width_dip ?? 0}
-                onChange={e => updateCandidateWindow('min_width_dip', Number(e.target.value))}
-                className="w-full h-1 bg-slate-700 rounded appearance-none accent-emerald-500 mt-1.5"
-              />
-            </div>
-
-            {!candWin.background_image && (
+            <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="text-slate-400">纯色背景色</label>
-                <div className="flex gap-2 items-center mt-1">
-                  <input
-                    type="color"
-                    value={candWin.background_color || '#ffffff'}
-                    onChange={e => updateCandidateWindow('background_color', e.target.value)}
-                    className="w-7 h-7 rounded border border-slate-700 bg-transparent cursor-pointer"
-                  />
-                  <input
-                    type="text"
-                    value={candWin.background_color || '#ffffff'}
-                    onChange={e => updateCandidateWindow('background_color', e.target.value)}
-                    className="flex-1 bg-slate-800 border border-slate-700 rounded px-2.5 py-1 text-slate-100 font-mono"
-                  />
-                </div>
+                <label className={labelCls}>版本</label>
+                <input type="text" value={config.meta.version} onChange={e => updateMeta({ version: e.target.value })} className={inputCls} />
               </div>
-            )}
-          </div>
-        </div>
-
-        {/* 字体与配色 */}
-        <div className="space-y-3">
-          <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-purple-500"></span>
-            文字与配色方案
-          </h3>
-
-          <div className="space-y-3 text-xs">
-            {/* 预编辑文字 */}
-            <div>
-              <label className="text-slate-400">预编辑区文字颜色 (Pinyin)</label>
-              <div className="flex gap-2 items-center mt-1">
-                <input
-                  type="color"
-                  value={config.preedit?.text_color || '#334155'}
-                  onChange={e => updatePreedit('text_color', e.target.value)}
-                  className="w-7 h-7 rounded border border-slate-700 bg-transparent cursor-pointer"
-                />
-                <input
-                  type="text"
-                  value={config.preedit?.text_color || '#334155'}
-                  onChange={e => updatePreedit('text_color', e.target.value)}
-                  className="flex-1 bg-slate-800 border border-slate-700 rounded px-2.5 py-1 text-slate-100 font-mono"
-                />
+              <div>
+                <label className={labelCls}>作者</label>
+                <input type="text" value={config.meta.author || ''} onChange={e => updateMeta({ author: e.target.value || undefined })} className={inputCls} />
               </div>
             </div>
-
-            {/* 候选词文字 */}
             <div>
-              <label className="text-slate-400">普通候选词颜色</label>
-              <div className="flex gap-2 items-center mt-1">
-                <input
-                  type="color"
-                  value={config.candidate_item?.text_color || '#0f172a'}
-                  onChange={e => updateCandidateItem('text_color', e.target.value)}
-                  className="w-7 h-7 rounded border border-slate-700 bg-transparent cursor-pointer"
-                />
-                <input
-                  type="text"
-                  value={config.candidate_item?.text_color || '#0f172a'}
-                  onChange={e => updateCandidateItem('text_color', e.target.value)}
-                  className="flex-1 bg-slate-800 border border-slate-700 rounded px-2.5 py-1 text-slate-100 font-mono"
-                />
-              </div>
+              <label className={labelCls}>说明</label>
+              <input type="text" value={config.meta.description || ''} onChange={e => updateMeta({ description: e.target.value || undefined })} className={inputCls} />
             </div>
-
-            {/* 序号颜色 */}
             <div>
-              <label className="text-slate-400">数字序号颜色</label>
-              <div className="flex gap-2 items-center mt-1">
-                <input
-                  type="color"
-                  value={config.candidate_item?.number_color || '#94a3b8'}
-                  onChange={e => updateCandidateItem('number_color', e.target.value)}
-                  className="w-7 h-7 rounded border border-slate-700 bg-transparent cursor-pointer"
-                />
-                <input
-                  type="text"
-                  value={config.candidate_item?.number_color || '#94a3b8'}
-                  onChange={e => updateCandidateItem('number_color', e.target.value)}
-                  className="flex-1 bg-slate-800 border border-slate-700 rounded px-2.5 py-1 text-slate-100 font-mono"
-                />
-              </div>
-            </div>
-
-            {/* 首选高亮色 */}
-            <div>
-              <label className="text-slate-400">首选项高亮颜色</label>
-              <div className="flex gap-2 items-center mt-1">
-                <input
-                  type="color"
-                  value={config.highlight_item?.text_color || '#2563eb'}
-                  onChange={e => updateHighlightItem('text_color', e.target.value)}
-                  className="w-7 h-7 rounded border border-slate-700 bg-transparent cursor-pointer"
-                />
-                <input
-                  type="text"
-                  value={config.highlight_item?.text_color || '#2563eb'}
-                  onChange={e => updateHighlightItem('text_color', e.target.value)}
-                  className="flex-1 bg-slate-800 border border-slate-700 rounded px-2.5 py-1 text-slate-100 font-mono"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* 选中的挂件配置 */}
-        {selectedAcc && (
-          <div className="space-y-3 bg-slate-850 p-3 rounded-lg border border-slate-700">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-semibold text-emerald-400 uppercase tracking-wider">
-                当前挂件: {selectedAcc.id}
-              </h3>
-              <button
-                onClick={() => onRemoveAccessory(selectedAcc.id)}
-                className="text-[11px] text-rose-400 hover:text-rose-300"
+              <label className={labelCls}>基础皮肤 base</label>
+              <select
+                value={config.meta.base}
+                onChange={e => updateMeta({ base: e.target.value as BuiltInSkin })}
+                className={inputCls}
               >
-                删除挂件
-              </button>
+                {BUILT_IN_SKINS.map(id => (
+                  <option key={id} value={id}>
+                    {BUILT_IN_SKIN_LABELS[id]}
+                  </option>
+                ))}
+              </select>
             </div>
+            <div>
+              <label className={labelCls}>支持的布局</label>
+              <div className="flex gap-3 mt-1">
+                {(['horizontal', 'vertical'] as const).map(mode => {
+                  const layouts = config.meta.supports?.layouts ?? ['horizontal'];
+                  const checked = layouts.includes(mode);
+                  return (
+                    <label key={mode} className="flex items-center gap-1.5">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() =>
+                          updateMeta({
+                            supports: {
+                              ...config.meta.supports,
+                              layouts: checked ? layouts.filter(m => m !== mode) : [...layouts, mode]
+                            }
+                          })
+                        }
+                      />
+                      {mode === 'horizontal' ? '横排' : '竖排'}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </section>
 
-            <div className="space-y-2 text-xs">
+        {/* 窗口几何 */}
+        <section className="space-y-3">
+          <h3 className={headingCls}>候选窗口</h3>
+          <div className="space-y-3 text-xs">
+            <Slider dark={isDarkMode} label="外框圆角 corner_radius_dip" value={cw.corner_radius_dip ?? 0} min={0} max={32}
+              onChange={v => updateWindow({ corner_radius_dip: v })} />
+            <Slider dark={isDarkMode} label="外框线宽 border_width_dip" value={cw.border_width_dip ?? 0} min={0} max={4} step={0.5}
+              onChange={v => updateWindow({ border_width_dip: v })} />
+            <Slider dark={isDarkMode} label="高亮圆角 item_corner_radius_dip" value={cw.item_corner_radius_dip ?? 0} min={0} max={16}
+              onChange={v => updateWindow({ item_corner_radius_dip: v })} />
+            <Slider dark={isDarkMode} label="最小宽度 min_width_dip" value={cw.min_width_dip ?? 0} min={0} max={600}
+              onChange={v => updateWindow({ min_width_dip: v })} />
+            <Slider dark={isDarkMode} label="行距 line_gap_dip" value={cw.line_gap_dip ?? 0} min={0} max={40}
+              onChange={v => updateWindow({ line_gap_dip: v })} />
+
+            <div>
+              <label className={labelCls}>阴影 shadow</label>
+              <select
+                value={cw.shadow ?? ''}
+                onChange={e => updateWindow({ shadow: (e.target.value || undefined) as SkinV2Config['candidate_window']['shadow'] })}
+                className={inputCls}
+              >
+                <option value="">沿用 base</option>
+                <option value="none">none</option>
+                <option value="soft">soft</option>
+                <option value="strong">strong</option>
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>候选字体 font_family</label>
+              <input
+                type="text"
+                value={cw.font_family || ''}
+                placeholder="留空沿用 base"
+                onChange={e => updateWindow({ font_family: e.target.value || undefined })}
+                className={inputCls}
+              />
+            </div>
+            <div className="flex gap-4">
+              <label className="flex items-center gap-1.5">
+                <input type="checkbox" checked={cw.page_arrows === true} onChange={e => updateWindow({ page_arrows: e.target.checked })} />
+                翻页箭头
+              </label>
+              <label className="flex items-center gap-1.5">
+                <input type="checkbox" checked={cw.fit_content === true} onChange={e => updateWindow({ fit_content: e.target.checked })} />
+                宽度贴紧内容
+              </label>
+            </div>
+          </div>
+        </section>
+
+        {/* 九宫格面板 */}
+        <section className="space-y-3">
+          <h3 className={headingCls}>九宫格面板 border_image</h3>
+          <div className="space-y-2 text-xs">
+            <div className={`font-mono truncate ${labelCls}`}>{cw.border_image?.source || '未设置'}</div>
+            <NumberList dark={isDarkMode} label="slice_dip（上右下左）" values={cw.border_image?.slice_dip ?? []}
+              onChange={v => updateWindow({ border_image: { ...(cw.border_image || { source: '' }), slice_dip: v } })} />
+            <NumberList dark={isDarkMode} label="width_dip（留空沿用 slice）" values={cw.border_image?.width_dip ?? []}
+              onChange={v => updateWindow({ border_image: { ...(cw.border_image || { source: '' }), width_dip: v.length ? v : undefined } })} />
+            <label className="flex items-center gap-1.5">
+              <input
+                type="checkbox"
+                checked={cw.border_image?.fill !== false}
+                onChange={e => updateWindow({ border_image: { ...(cw.border_image || { source: '' }), fill: e.target.checked } })}
+              />
+              保留中心内容区 fill
+            </label>
+          </div>
+        </section>
+
+        {/* 内边距 */}
+        <section className="space-y-3">
+          <h3 className={headingCls}>内边距与窗口留白</h3>
+          <div className="space-y-2 text-xs">
+            <InsetsEditor
+              label="content_insets_dip（从面板外缘量起）"
+              insets={cw.content_insets_dip}
+              dark={isDarkMode}
+              onChange={v => updateWindow({ content_insets_dip: v })}
+            />
+            <InsetsEditor
+              label="outer_insets_dip（挂件外挂时窗口多留的空白）"
+              insets={cw.outer_insets_dip}
+              dark={isDarkMode}
+              onChange={v => updateWindow({ outer_insets_dip: v })}
+            />
+          </div>
+        </section>
+
+        {/* 配色 */}
+        <section className="space-y-3">
+          <h3 className={headingCls}>配色（深色主题）</h3>
+          <div className="space-y-2 text-xs">
+            {colorInput('dark', 'text', '候选文字 text', '#e9e8e8')}
+            {colorInput('dark', 'preedit_text', '预编辑文字 preedit_text', '#8e8cd8')}
+            {colorInput('dark', 'number', '序号 number', '#e9e8e89d')}
+            {colorInput('dark', 'accent', '强调 accent', '#8e8cd8')}
+            {colorInput('dark', 'surface', '卡片底色 surface', '#202020')}
+            {colorInput('dark', 'border', '外框色 border', '#9b9b9b2e')}
+            {colorInput('dark', 'selected_text', '选中文字 selected_text', '#ffffff')}
+            {colorInput('dark', 'selected', '选中底色 selected', '#3e3e3eb9')}
+            {colorInput('dark', 'hover', '悬停底色 hover', '#414141')}
+          </div>
+        </section>
+
+        <section className="space-y-3">
+          <h3 className={headingCls}>配色（浅色主题）</h3>
+          <div className="space-y-2 text-xs">
+            {colorInput('light', 'text', '候选文字 text', '#1a1a1a')}
+            {colorInput('light', 'preedit_text', '预编辑文字 preedit_text', '#6f6bc7')}
+            {colorInput('light', 'number', '序号 number', '#1a1a1a8c')}
+            {colorInput('light', 'accent', '强调 accent', '#6f6bc7')}
+            {colorInput('light', 'surface', '卡片底色 surface', '#ffffff')}
+            {colorInput('light', 'border', '外框色 border', '#0000001f')}
+            {colorInput('light', 'selected_text', '选中文字 selected_text', '#1a1a1a')}
+            {colorInput('light', 'selected', '选中底色 selected', '#e8e8e8')}
+            {colorInput('light', 'hover', '悬停底色 hover', '#ececec')}
+          </div>
+        </section>
+
+        {/* 挂件 */}
+        <section className="space-y-3">
+          <h3 className={headingCls}>
+            自由挂件 decorations（{decorations.length}）
+          </h3>
+          {decorations.length === 0 && <p className={`text-[11px] ${labelCls}`}>从左侧素材点「+ 挂件」添加</p>}
+          <div className="space-y-1">
+            {decorations.map((dec, idx) => (
+              <div
+                key={idx}
+                ref={node => {
+                  if (node && selectedDecorationIndex === idx) node.scrollIntoView({ block: 'nearest' });
+                }}
+                onClick={() => onSelectDecoration(idx)}
+                className={`w-full text-left text-[11px] px-2 py-1 rounded font-mono truncate cursor-pointer border ${
+                  selectedDecorationIndex === idx
+                    ? 'bg-emerald-600 text-white border-emerald-500'
+                    : isDarkMode
+                    ? 'bg-slate-800 text-slate-300 hover:bg-slate-700 border-transparent'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border-transparent'
+                }`}
+              >
+                #{idx} {dec.anchor} {dec.image.replace('assets/', '')}
+              </div>
+            ))}
+          </div>
+
+          {selected && (
+            <div className={subPanelCls}>
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-emerald-400">#{selectedDecorationIndex} 挂件</span>
+                <button onClick={() => onRemoveDecoration(selectedDecorationIndex as number)} className="text-rose-400">
+                  删除
+                </button>
+              </div>
               <div>
-                <label className="text-slate-400">定位锚点 (Anchor)</label>
+                <label className={labelCls}>锚点 anchor</label>
                 <select
-                  value={selectedAcc.anchor}
-                  onChange={e => updateAccessory(selectedAcc.id, 'anchor', e.target.value as AccessoryAnchor)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-100 mt-1"
+                  value={selected.anchor}
+                  onChange={e => onUpdateDecoration(selectedDecorationIndex as number, { anchor: e.target.value as DecorationAnchor })}
+                  className={inputCls}
                 >
-                  <option value="top_left">左上角 (top_left)</option>
-                  <option value="top_right">右上角 (top_right)</option>
-                  <option value="bottom_left">左下角 (bottom_left)</option>
-                  <option value="bottom_right">右下角 (bottom_right)</option>
-                  <option value="center">中心 (center)</option>
+                  {DECORATION_ANCHORS.map(a => (
+                    <option key={a} value={a}>
+                      {a}
+                    </option>
+                  ))}
                 </select>
               </div>
-
               <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-slate-400">X 偏移 (DIP)</label>
-                  <input
-                    type="number"
-                    value={selectedAcc.offset_dip.x}
-                    onChange={e =>
-                      updateAccessory(selectedAcc.id, 'offset_dip', {
-                        ...selectedAcc.offset_dip,
-                        x: Number(e.target.value)
-                      })
-                    }
-                    className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-100 mt-1"
-                  />
-                </div>
-                <div>
-                  <label className="text-slate-400">Y 偏移 (DIP)</label>
-                  <input
-                    type="number"
-                    value={selectedAcc.offset_dip.y}
-                    onChange={e =>
-                      updateAccessory(selectedAcc.id, 'offset_dip', {
-                        ...selectedAcc.offset_dip,
-                        y: Number(e.target.value)
-                      })
-                    }
-                    className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-100 mt-1"
-                  />
-                </div>
+                <NumberField dark={isDarkMode} label="宽 width_dip" value={selected.width_dip}
+                  onChange={v => onUpdateDecoration(selectedDecorationIndex as number, { width_dip: v })} />
+                <NumberField dark={isDarkMode} label="高 height_dip" value={selected.height_dip}
+                  onChange={v => onUpdateDecoration(selectedDecorationIndex as number, { height_dip: v })} />
+                <NumberField dark={isDarkMode} label="offset_x_dip" value={selected.offset_x_dip ?? 0}
+                  onChange={v => onUpdateDecoration(selectedDecorationIndex as number, { offset_x_dip: v })} />
+                <NumberField dark={isDarkMode} label="offset_y_dip" value={selected.offset_y_dip ?? 0}
+                  onChange={v => onUpdateDecoration(selectedDecorationIndex as number, { offset_y_dip: v })} />
               </div>
-
-              <div>
-                <label className="text-slate-400">图层顺序 (Z-Order)</label>
-                <input
-                  type="number"
-                  value={selectedAcc.z_order}
-                  onChange={e => updateAccessory(selectedAcc.id, 'z_order', Number(e.target.value))}
-                  className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-100 mt-1"
-                />
-              </div>
+              <NumberField dark={isDarkMode} label="z_index" value={selected.z_index ?? 2}
+                onChange={v => onUpdateDecoration(selectedDecorationIndex as number, { z_index: v })} />
+              <p className="text-[10px] text-slate-500 leading-relaxed">
+                offset 正数向右向下。挂到卡片外的立绘要在 outer_insets_dip 里留出同样多的空间，否则会被窗口裁掉。
+              </p>
             </div>
-          </div>
-        )}
+          )}
+        </section>
       </div>
     </div>
   );
 };
+
+const Slider: React.FC<{ label: string; value: number; min: number; max: number; step?: number; dark: boolean; onChange: (v: number) => void }> = ({
+  label,
+  value,
+  min,
+  max,
+  step = 1,
+  dark,
+  onChange
+}) => (
+  <div>
+    <label className={`${labelClsFor(dark)} flex justify-between`}>
+      <span>{label}</span>
+      <span className="font-mono">{value}</span>
+    </label>
+    <input
+      type="range"
+      min={min}
+      max={max}
+      step={step}
+      value={value}
+      onChange={e => onChange(Number(e.target.value))}
+      className={`w-full h-1 rounded appearance-none accent-emerald-500 mt-1.5 ${dark ? 'bg-slate-700' : 'bg-slate-200'}`}
+    />
+  </div>
+);
+
+const NumberField: React.FC<{ label: string; value: number; dark: boolean; onChange: (v: number) => void }> = ({
+  label,
+  value,
+  dark,
+  onChange
+}) => (
+  <div>
+    <label className={labelClsFor(dark)}>{label}</label>
+    <input type="number" value={value} onChange={e => onChange(Number(e.target.value))} className={fieldCls(dark)} />
+  </div>
+);
+
+/** 1~4 个值的数组编辑，逗号分隔。 */
+const NumberList: React.FC<{ label: string; values: number[]; dark: boolean; onChange: (v: number[]) => void }> = ({
+  label,
+  values,
+  dark,
+  onChange
+}) => (
+  <div>
+    <label className={labelClsFor(dark)}>{label}</label>
+    <input
+      type="text"
+      value={values.join(', ')}
+      placeholder="留空"
+      onChange={e => {
+        const parsed = e.target.value
+          .split(',')
+          .map(s => Number(s.trim()))
+          .filter(n => !Number.isNaN(n));
+        onChange(parsed);
+      }}
+      className={`${fieldCls(dark)} font-mono`}
+    />
+  </div>
+);
+
+const InsetsEditor: React.FC<{
+  label: string;
+  insets?: { top: number; right: number; bottom: number; left: number };
+  dark: boolean;
+  onChange: (v: any) => void;
+}> = ({ label, insets, dark, onChange }) => (
+  <div>
+    <label className={labelClsFor(dark)}>{label}</label>
+    <div className="grid grid-cols-4 gap-1 mt-1">
+      {(['top', 'right', 'bottom', 'left'] as const).map(side => (
+        <input
+          key={side}
+          type="number"
+          title={side}
+          value={insets?.[side] ?? 0}
+          onChange={e => onChange({ ...(insets || { top: 0, right: 0, bottom: 0, left: 0 }), [side]: Number(e.target.value) })}
+          className={`${fieldCls(dark)} mt-0 text-center`}
+        />
+      ))}
+    </div>
+  </div>
+);

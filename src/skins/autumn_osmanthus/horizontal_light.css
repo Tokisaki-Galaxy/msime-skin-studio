@@ -1,0 +1,231 @@
+:root {
+      --cand-font-family: 'Segoe UI', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+      --cand-font-size: 16px;
+      --preedit-font-size: var(--cand-font-size);
+      --cand-text: #333333;
+      --cand-num: #757575;
+      /* Fallback before C++ injects host-width DIP. Wrap limit = 宿主宽度. */
+      --msime-max-width-dip: 100%;
+      --msime-max-height-dip: 100%;
+    }
+
+    body {
+      font-family: var(--cand-font-family);
+      font-size: var(--cand-font-size);
+      height: 100vh;
+      margin: 0;
+      overflow: hidden;
+      border-radius: 6px;
+      background: transparent;
+    }
+
+    .containerParent {
+      width: fit-content;
+      max-width: var(--msime-max-width-dip);
+    }
+
+    .container {
+      margin-top: 0px;
+      margin-left: 0px;
+      background: #ffffff;
+      /* background: url("https://appassets/background.jpg"); */
+      padding: 2px;
+      border-radius: 6px;
+      box-shadow: 8px 10px 24px rgba(0, 0, 0, 0.18), 2px 3px 8px rgba(0, 0, 0, 0.10);
+      min-width: 7em;
+      /* Wrap only when content reaches the host (injected) max width. */
+      width: min(max-content, var(--msime-max-width-dip));
+      max-width: var(--msime-max-width-dip);
+      /* Host height in DIP (injected). Do not use min(100%, …): parent height is
+         content-sized so 100% never resolves and tall vertical lists get clipped
+         by the HWND instead of scrolling. */
+      max-height: var(--msime-max-height-dip);
+      box-sizing: border-box;
+      overflow-x: hidden;
+      overflow-y: auto;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      white-space: normal;
+      user-select: none;
+      border: 1.5px solid rgba(0, 0, 0, 0.12);
+    }
+
+    .cursor {
+      display: inline-block;
+      width: 1.5px;
+      height: 1.2em;
+      background: #6b69d6;
+      transform: translate(1.3px, 10%);
+    }
+
+    .row {
+      justify-content: space-between;
+      /* padding: 2px; */
+      /* padding-right: 12px; */
+      padding-top: 0;
+      padding-bottom: 0;
+      margin-top: 2px;
+      margin-bottom: 1px;
+    }
+
+    .cand {
+      border-radius: 4px;
+    }
+
+    .hover-active .cand:hover {
+      background-color: #ececec;
+    }
+
+    .row-wrapper {
+      position: relative;
+      display: inline-block;
+      vertical-align: top;
+      max-width: 100%;
+      min-width: 0;
+      box-sizing: border-box;
+      white-space: normal;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    .first-row-wrapper {
+      margin-left: 2px;
+    }
+
+    .first {
+      background-color: #e8e8e8;
+      border-radius: 4px;
+    }
+
+    /* bar */
+    .first::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 53%;
+      transform: translateY(-50%);
+      height: 0.8em;
+      width: 0.2em;
+      background: #6b69d6;
+      border-radius: 8px;
+    }
+
+    .text {
+      padding-left: calc(0.2em + 3px);
+      padding-right: 5px;
+      color: var(--cand-text);
+      display: block;
+      min-width: 0;
+      max-width: 100%;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    .cand .text {
+      padding-left: calc(0.1em + 1px);
+      padding-right: 2.5px;
+      line-height: 1.2;
+    }
+
+    .num {
+      font-size: 0.8em;
+      color: var(--cand-num);
+      margin-right: 0;
+    }
+
+    .pinyin {
+      font-size: var(--preedit-font-size);
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 0;
+    }
+
+    .hidden-pinyin {
+      visibility: hidden;
+    }
+
+    /* Hide candidate-window top preedit when configured as empty */
+    .container.preedit-hidden > .row.pinyin {
+      display: none;
+    }
+
+    /* Hide container when empty */
+    .container:empty {
+      padding: 0;
+      border: none;
+      box-shadow: none;
+      min-width: 0;
+    }
+    .context-menu { display:none; position:fixed; z-index:1000; background:#fff; color:#1a1a1a;
+      border:1px solid #00000020; border-radius:6px; padding:1px 0; min-width:86px; font-size:14px; line-height:20px; }
+    .context-menu-item { position:relative; padding:1px 20px 1px 4px; margin:2px; border-radius:4px; cursor:default; white-space:nowrap; }
+    .context-menu-item:hover { background:#ececec; }
+    .context-menu-parent::after { content:"›"; position:absolute; right:6px; }
+    .context-submenu { display:none; position:absolute; left:100%; top:-2px; min-width:0;
+      background:#fff; border:1px solid #00000020; border-radius:6px; padding:1px 0; }
+    .context-submenu .context-menu-item { padding-right: 8px; }
+    .context-menu-parent:hover>.context-submenu { display:block; }
+    .context-menu-separator { height:1px; margin:3px 5px; background:#00000020; }
+    /* Autumn osmanthus light: an inset rounded highlight. The first candidate's
+       left corners and the last one's right corners share the frame's radius
+       where they meet the frame's corners. */
+    :root { --cand-text: #1f3138; --cand-num: #5b727b; }
+    body { border-radius: 10px; }
+    .container {
+      --ao-surface: #d6ecf0;
+      --ao-hilite: #ffe399;
+      --ao-radius: 10px;
+      --ao-item-radius: 6px;
+      background: var(--ao-surface);
+      padding: 5px;
+      border: none;
+      border-radius: var(--ao-radius);
+      box-shadow: 8px 10px 24px rgba(0, 0, 0, .18), 2px 3px 8px rgba(0, 0, 0, .10);
+      letter-spacing: -0.31em;
+    }
+    .row.pinyin {
+      letter-spacing: normal;
+      margin-top: 0;
+      margin-bottom: 2px;
+      padding: 1px 10px 1px 6px;
+    }
+    .row.cand {
+      margin-top: 0;
+      margin-bottom: 0;
+      padding: 4px 6px;
+      border-radius: var(--ao-item-radius);
+    }
+    .row-wrapper {
+      display: inline-block;
+      letter-spacing: normal;
+      margin: 0 2px 0 0;
+      vertical-align: top;
+    }
+    .first-row-wrapper { margin-left: 0; }
+    /* last-visible: ApplyCandidateFrame hides unused candidates instead of removing them. */
+    .container > .row-wrapper:is(:last-child, .last-visible) { margin-right: 0; }
+    .container > .pinyin + .row-wrapper > .cand { border-bottom-left-radius: var(--ao-radius); }
+    .container.preedit-hidden > .pinyin + .row-wrapper > .cand { border-top-left-radius: var(--ao-radius); }
+    .container > .row-wrapper:is(:last-child, .last-visible) > .cand { border-bottom-right-radius: var(--ao-radius); }
+    .container.preedit-hidden > .row-wrapper:is(:last-child, .last-visible) > .cand {
+      border-top-right-radius: var(--ao-radius);
+    }
+    .cursor { background: #e6a817; }
+    .hover-active .cand:not(.first):hover { background-color: rgba(255, 227, 153, .55); }
+    .hover-active .cand.first:hover { background-color: var(--ao-hilite); }
+    .first { background-color: var(--ao-hilite); }
+    .first::before { display: none; }
+    .first .text,
+    .first .num { color: #1a1a1a; }
+    .context-menu,
+    .context-submenu { background: #e8f5f7; border-color: #bcd8de; color: #1f3138; }
+    .context-menu-item:hover { background: #d2e8ec; }
+    /* 翻译单词取 Notion Orange，词性（.cand-pos）用相邻的 Notion Red 再调淡，分隔符（.cand-sep）是单词色降不透明度；D2D 端同值见 candidate_presenter.cpp。 */
+    .cand-translation { color: #d9730d; opacity: 1; }
+    .cand-translation .cand-pos { color: #e03e3e80; }
+    .cand-translation .cand-sep { color: #d9730d73; }
+    .first .cand-translation { color: #64473a; }
+    .first .cand-translation .cand-pos { color: #e03e3e80; }
+    .first .cand-translation .cand-sep { color: #64473a73; }

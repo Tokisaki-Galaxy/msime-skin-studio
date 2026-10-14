@@ -1,0 +1,216 @@
+/* 微软风格：仿 Windows 11 微软拼音的候选框。尺寸以 em 写，随候选字号缩放；
+   D2D 端在 CandidatePresenter::ApplySkin 的 microsoft 分支里用同一组值。 */
+:root {
+      --cand-font-family: 'Segoe UI', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+      --cand-font-size: 16px;
+      --preedit-font-size: var(--cand-font-size);
+      --cand-text: #ffffff;
+      --cand-num: #cfcfcf;
+      --ms-accent: #e183d9;
+      --ms-selected: #383838;
+      --ms-hover: #353535;
+      --ms-divider: #3d3d3d;
+      /* Fallback before C++ injects host-width DIP. Wrap limit = 宿主宽度. */
+      --msime-max-width-dip: 100%;
+      --msime-max-height-dip: 100%;
+    }
+
+    body {
+      font-family: var(--cand-font-family);
+      font-size: var(--cand-font-size);
+      height: 100vh;
+      margin: 0;
+      overflow: hidden;
+      border-radius: 8px;
+      background: transparent;
+    }
+
+    .containerParent {
+      width: fit-content;
+      max-width: var(--msime-max-width-dip);
+    }
+
+    .container {
+      margin-top: 0px;
+      margin-left: 0px;
+      background: #2c2c2c;
+      /* 候选行换行时行间也隔 0.28em（写在 .row-wrapper 的下外边距上），底边内边距扣掉这一段，四周仍是 0.3em。 */
+      padding: 0.3em 0.3em 0.02em;
+      border-radius: 8px;
+      box-shadow: 8px 10px 24px rgba(0, 0, 0, 0.34), 2px 3px 8px rgba(0, 0, 0, 0.22);
+      min-width: 7em;
+      /* Wrap only when content reaches the host (injected) max width. */
+      width: min(max-content, var(--msime-max-width-dip));
+      max-width: var(--msime-max-width-dip);
+      /* Host height in DIP (injected). Do not use min(100%, …): parent height is
+         content-sized so 100% never resolves and tall vertical lists get clipped
+         by the HWND instead of scrolling. */
+      max-height: var(--msime-max-height-dip);
+      box-sizing: border-box;
+      overflow-x: hidden;
+      overflow-y: auto;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      white-space: normal;
+      user-select: none;
+      border: 1px solid #1c1c1c;
+    }
+
+    .cursor {
+      display: inline-block;
+      width: 1.5px;
+      height: 1.2em;
+      background: var(--ms-accent);
+      transform: translate(1.3px, 10%);
+    }
+
+    .row {
+      margin: 0;
+    }
+
+    /* 每项至少 4.35em 宽、项间隔 0.28em，与微软拼音一样短候选也占一格。 */
+    .row-wrapper {
+      position: relative;
+      display: inline-block;
+      vertical-align: top;
+      max-width: 100%;
+      min-width: 0;
+      margin-right: 0.28em;
+      margin-bottom: 0.28em;
+      box-sizing: border-box;
+      white-space: normal;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    .container > .row-wrapper:is(:last-child, .last-visible) {
+      margin-right: 0;
+    }
+
+    .cand {
+      position: relative;
+      box-sizing: border-box;
+      min-width: 4.35em;
+      padding: 0.235em 0.9em 0.235em 0.76em;
+      border-radius: 4px;
+    }
+
+    .hover-active .cand:not(.first):hover {
+      background-color: var(--ms-hover);
+    }
+
+    .first {
+      background-color: var(--ms-selected);
+    }
+
+    /* 选中条落在高亮左缘之内，比字高一些。 */
+    .first::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      height: 1.1em;
+      width: max(3px, 0.24em);
+      background: var(--ms-accent);
+      border-radius: 99px;
+    }
+
+    .text {
+      padding-left: 5px;
+      padding-right: 5px;
+      color: var(--cand-text);
+      display: block;
+      min-width: 0;
+      max-width: 100%;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    .cand .text {
+      padding: 0;
+      line-height: 1.35;
+    }
+
+    /* 序号与候选同字号。 */
+    .num {
+      color: var(--cand-num);
+      margin-right: 0.2em;
+    }
+
+    .pinyin {
+      font-size: var(--preedit-font-size);
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 2px;
+    }
+
+    .hidden-pinyin {
+      visibility: hidden;
+    }
+
+    /* Hide candidate-window top preedit when configured as empty */
+    .container.preedit-hidden > .row.pinyin {
+      display: none;
+    }
+
+    /* Hide container when empty */
+    .container:empty {
+      padding: 0;
+      border: none;
+      box-shadow: none;
+      min-width: 0;
+    }
+
+    /* 翻页：实心三角，与候选行等高，前面一条分隔线。 */
+    html[data-page-arrows="on"][data-candidate-layout="horizontal"] .page-arrows {
+      vertical-align: top;
+      gap: 0;
+      margin: 0 0 0.28em 0.3em;
+      padding-left: 0.12em;
+      border-left: 1px solid var(--ms-divider);
+    }
+    .page-arrow {
+      width: 1.73em;
+      height: 1.82em;
+      border-radius: 4px;
+      color: var(--cand-text);
+    }
+    .page-arrow::before {
+      width: 0.47em;
+      height: 0.56em;
+      border: none;
+      transform: none;
+      background: currentColor;
+      -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 12'%3E%3Cpath d='M7.43 4.46L2.57 1.54Q0 0 0 3L0 9Q0 12 2.57 10.46L7.43 7.54Q10 6 7.43 4.46Z' fill='black'/%3E%3C/svg%3E") center / contain no-repeat;
+      mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 12'%3E%3Cpath d='M7.43 4.46L2.57 1.54Q0 0 0 3L0 9Q0 12 2.57 10.46L7.43 7.54Q10 6 7.43 4.46Z' fill='black'/%3E%3C/svg%3E") center / contain no-repeat;
+    }
+    .page-arrow-prev::before {
+      transform: scaleX(-1);
+    }
+    .page-arrow-next::before {
+      transform: none;
+    }
+    .page-arrow.disabled {
+      opacity: 0.25;
+    }
+    .hover-active .page-arrow:not(.disabled):hover {
+      background: var(--ms-hover);
+    }
+
+    .context-menu { display:none; position:fixed; z-index:1000; background:#2c2c2c; color:#ffffff;
+      border:1px solid #1c1c1c; border-radius:8px; padding:1px 0; min-width:86px; font-size:14px; line-height:20px; }
+    .context-menu-item { position:relative; padding:1px 20px 1px 4px; margin:2px; border-radius:4px; cursor:default; white-space:nowrap; }
+    .context-menu-item:hover { background:#383838; }
+    .context-menu-parent::after { content:"›"; position:absolute; right:6px; }
+    .context-submenu { display:none; position:absolute; left:100%; top:-2px; min-width:0;
+      background:#2c2c2c; border:1px solid #1c1c1c; border-radius:8px; padding:1px 0; }
+    .context-submenu .context-menu-item { padding-right: 8px; }
+    .context-menu-parent:hover>.context-submenu { display:block; }
+    .context-menu-separator { height:1px; margin:3px 5px; background:#ffffff20; }
+    /* 翻译单词取 Notion Pink，词性（.cand-pos）用相邻的 Notion Purple 再调淡，分隔符（.cand-sep）是单词色降不透明度；D2D 端同值见 candidate_presenter.cpp。 */
+    .cand-translation { color: #e255a1; opacity: 1; }
+    .cand-translation .cand-pos { color: #9a6dd780; }
+    .cand-translation .cand-sep { color: #e255a173; }

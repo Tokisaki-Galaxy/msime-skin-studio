@@ -150,12 +150,15 @@ export const CandidatePreview: React.FC<CandidatePreviewProps> = ({
 <meta charset="UTF-8">
 <style>
   html { --msime-max-width-dip: 720px; --msime-max-height-dip: 2000px; --cand-font-size: 16px; --preedit-font-size: 16px; ${hostVarStyle} }
-  /* 预览里候选窗就是整份文档。不能沿用真实页面的 height:100vh（测高会自锁），
-     也不要让文档自己出滚动条 —— 尺寸由外层按量到的 scrollWidth/scrollHeight 设定。 */
-  html, body { overflow: hidden; }
+  /* 预览里候选窗就是整份文档。不能沿用真实页面的 height:100vh（测高会自锁）。
+     尺寸由宿主侧量所有后代的实际包围盒得出（见 measure），这里不设 overflow:hidden：
+     挂件与 containerParent 会按 outer_insets 溢出到 stage 之外，夹住就量不到真实需要多大。 */
   body { margin: 0; padding: ${padTop}px ${padRight}px ${padBottom}px ${padLeft}px; box-sizing: border-box;
          height: auto !important; min-height: 0 !important;
-         background: transparent !important; display: inline-block; vertical-align: top; }
+         background: transparent !important; display: inline-block; vertical-align: top;
+         /* 关键：inline-block 的收缩宽度会被 iframe 视口夹住，卡片就永远不超过当前 iframe 宽，
+            测量自我锁定、右边被裁。max-content 让 body 按内容撑开，配合上面的测量才能得到真实尺寸。 */
+         width: max-content !important; }
   .stage { position: relative; display: inline-block; }
   ${translationCss}
 </style>
@@ -181,18 +184,23 @@ ${decorDivs}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config, layoutMode, theme, backend, samplePinyin, sampleCandidates, sampleTranslations, samplePos, selectedIndex, hasPrevious, hasNext, assets, padTop, padRight, padBottom, padLeft]);
 
-  // 预览里候选窗就是整份文档，可以量到卡片加留白后的真实尺寸。不能把 iframe 设成
-  // width:100%：卡片按 --msime-max-width-dip 想要更宽时会被父容器夹住，iframe 内部出现
-  // 滚动条并把卡片裁掉。这里量文档尺寸后把 iframe 设成绝对尺寸，外层容器负责滚动。
+  // 预览里候选窗就是整份文档，不能把 iframe 设成 width:100%：卡片按内容撑开时会被父容器
+  // 夹住并裁掉右边。这里量 .stage 的包围盒（它与卡片加留白同尺寸，且不受 overflow 影响），
+  // 把 iframe 设成该尺寸，外层容器负责滚动；字体与图片加载后尺寸会变，所以挂 ResizeObserver。
   useEffect(() => {
     const frame = iframeRef.current;
     if (!frame) return;
+    let observer: ResizeObserver | null = null;
+
     const measure = () => {
       try {
         const doc = frame.contentDocument;
-        if (!doc) return;
-        const w = Math.max(doc.documentElement.scrollWidth, doc.body?.scrollWidth ?? 0) + 2;
-        const h = Math.max(doc.documentElement.scrollHeight, doc.body?.scrollHeight ?? 0) + 2;
+        const stage = doc?.querySelector('.stage');
+        if (!doc || !stage) return;
+        // body 是 width:max-content，会按内容撑开，所以 documentElement.scrollWidth 就是
+        // 卡片加留白的真实宽度；不需要再逐元素求并集。+2 吸收 subpixel 取整。
+        const w = Math.max(doc.documentElement.scrollWidth, doc.body.scrollWidth) + 2;
+        const h = Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight) + 2;
         if (w > 0 && h > 0) {
           setFrameSize(prev =>
             Math.abs(prev.width - w) < 1 && Math.abs(prev.height - h) < 1 ? prev : { width: w, height: h }
@@ -202,9 +210,29 @@ ${decorDivs}
         /* 跨文档异常忽略，保持上次尺寸 */
       }
     };
-    measure();
-    const t = window.setTimeout(measure, 80);
-    return () => window.clearTimeout(t);
+
+    const attach = () => {
+      measure();
+      try {
+        const stage = frame.contentDocument?.querySelector('.stage');
+        if (stage && typeof ResizeObserver !== 'undefined') {
+          observer = new ResizeObserver(measure);
+          observer.observe(stage);
+        }
+      } catch {
+        /* 忽略 */
+      }
+    };
+
+    // srcdoc 写入后内容才就绪；load 事件比固定延时可靠，另外补两次兜底覆盖字体/图片。
+    frame.addEventListener('load', attach);
+    const timers = [window.setTimeout(attach, 60), window.setTimeout(measure, 250), window.setTimeout(measure, 600)];
+    attach();
+    return () => {
+      frame.removeEventListener('load', attach);
+      timers.forEach(t => window.clearTimeout(t));
+      observer?.disconnect();
+    };
   }, [srcdoc, decorations.length]);
 
   // 挂件拖拽：位移直接换算成 offset_dip，正数向右向下，与两端语义一致。

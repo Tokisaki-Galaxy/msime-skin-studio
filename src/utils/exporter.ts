@@ -2,33 +2,37 @@ import JSZip from 'jszip';
 import { SkinV2Config, SkinAsset } from '../types/skin';
 import { serializeSkinToml } from './toml';
 
+/** 与 server/src/skin/candidate_skin_catalog.cpp 的 IsSafeId 一致。 */
+export function isSafeSkinId(id: string): boolean {
+  if (!id || id.length > 64) return false;
+  if (!/^[a-z0-9]/.test(id)) return false;
+  return /^[a-z0-9._-]+$/.test(id);
+}
+
 export async function exportSkinPackage(config: SkinV2Config, assets: Map<string, SkinAsset>): Promise<Blob> {
+  const id = config.meta.id;
+  if (!isSafeSkinId(id)) {
+    throw new Error(
+      `皮肤 id "${id}" 不合法。水杉要求：以小写字母或数字开头，只含小写字母、数字和 . _ -，长度不超过 64。\n` +
+        `id 还必须与皮肤目录名一致。`
+    );
+  }
+
   const zip = new JSZip();
+  const root = zip.folder(id) as JSZip;
 
-  // 1. 生成 skin.toml
-  const tomlContent = serializeSkinToml(config);
-  zip.file('skin.toml', tomlContent);
+  root.file('skin.toml', serializeSkinToml(config));
 
-  // 2. 写入使用到的 assets 文件
   for (const [pathKey, asset] of assets.entries()) {
-    // 检查是否有 blob 或 file
     if (asset.file) {
-      zip.file(pathKey, asset.file);
+      root.file(pathKey, asset.file);
     } else if (asset.blobUrl) {
       const resp = await fetch(asset.blobUrl);
-      const blob = await resp.blob();
-      zip.file(pathKey, blob);
+      root.file(pathKey, await resp.blob());
     }
   }
 
-  // 3. 打包并返回
-  const content = await zip.generateAsync({
-    type: 'blob',
-    compression: 'DEFLATE',
-    compressionOptions: { level: 9 }
-  });
-
-  return content;
+  return zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 9 } });
 }
 
 export function downloadBlob(blob: Blob, filename: string) {

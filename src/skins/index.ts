@@ -55,10 +55,10 @@ const BASE_CSS: Record<BuiltInSkin, Record<LayoutMode, Record<ThemeName, string>
 };
 
 // 候选窗页面 <head> 里那段与皮肤无关的公共样式，逐条照抄 horizontal_candidate_window.html。
+// 注意 `.cand .text` / `.cand-content` / `.cand-translation` 三条是**横排页头独有**的，
+// 竖排页头没有，翻译在竖排里靠皮肤 CSS 的 margin-left 同行显示。所以它们由预览按布局分流，
+// 这里只保留两个页面共有的翻页箭头部分。
 export const SHARED_CANDIDATE_CSS = `
-.cand .text { display: flex; align-items: baseline; }
-.cand-content { min-width: 0; }
-.cand-translation { display: block; font-size: 0.78em; line-height: 1.25; opacity: 0.62; }
 .page-arrows { display: none; }
 html[data-page-arrows="on"] .page-arrows {
   display: flex; justify-content: flex-start; align-items: center; gap: 1px;
@@ -79,6 +79,14 @@ html[data-page-arrows="on"][data-candidate-layout="horizontal"] .page-arrows {
 }
 .page-arrow-next::before { transform: translateX(-0.07em) rotate(-135deg); }
 .page-arrow.disabled { opacity: 0.3; }
+.hover-active .page-arrow:not(.disabled):hover { background: rgba(128, 128, 128, 0.22); }
+`;
+
+/** 横排页头独有的三条：翻译换到候选文字下方。竖排不注入。 */
+export const HORIZONTAL_PAGE_CSS = `
+.cand .text { display: flex; align-items: baseline; }
+.cand-content { min-width: 0; }
+.cand-translation { display: block; font-size: 0.78em; line-height: 1.25; opacity: 0.62; }
 `;
 
 export function baseSkinCss(base: BuiltInSkin, layout: LayoutMode, theme: ThemeName): string {

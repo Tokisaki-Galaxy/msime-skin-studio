@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Header } from './components/Header';
-import { CandidatePreview } from './components/CandidatePreview';
+import { CandidatePreview, PreviewBackend } from './components/CandidatePreview';
 import { AssetManager } from './components/AssetManager';
 import { ConfigPanel } from './components/ConfigPanel';
 import { SliceModal } from './components/SliceModal';
@@ -17,6 +17,31 @@ const DEFAULT_SLICE = (w: number, h: number) =>
 const MIN_SIDE = 200;
 const MIN_CENTER = 320;
 const MAX_SIDE = 640;
+const DEFAULT_LEFT = 320;
+const DEFAULT_RIGHT = 340;
+
+/** 把左右栏收进「中间至少留 MIN_CENTER」的预算里，返回钳制后的左右宽度。 */
+function clampSideWidths(left: number, right: number, total: number): { left: number; right: number } {
+  if (total <= 0) return { left, right };
+  // 两侧都压到最小值后仍放不下中间栏时，优先保中间栏，两侧按比例退让。
+  const budget = Math.max(0, total - MIN_CENTER);
+  if (budget < MIN_SIDE * 2) {
+    const scale = budget / (MIN_SIDE * 2);
+    const floor = Math.max(0, Math.floor(MIN_SIDE * scale));
+    return { left: Math.min(left, floor), right: Math.min(right, floor) };
+  }
+  let l = Math.max(MIN_SIDE, Math.min(MAX_SIDE, left));
+  let r = Math.max(MIN_SIDE, Math.min(MAX_SIDE, right));
+  // 先削右侧，不够再削左侧，始终不动中间栏。
+  const overflow = l + r - budget;
+  if (overflow > 0) {
+    const fromRight = Math.min(overflow, r - MIN_SIDE);
+    r -= fromRight;
+    const rest = overflow - fromRight;
+    if (rest > 0) l = Math.max(MIN_SIDE, l - rest);
+  }
+  return { left: l, right: r };
+}
 
 export const App: React.FC = () => {
   const [config, setConfig] = useState<SkinV2Config>(SKIN_TEMPLATES[0].config);
@@ -24,9 +49,11 @@ export const App: React.FC = () => {
 
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('horizontal');
   const [previewTheme, setPreviewTheme] = useState<ThemeName>('dark');
+  const [previewBackend, setPreviewBackend] = useState<PreviewBackend>('webview2');
   const [samplePinyin, setSamplePinyin] = useState("shui'shan'shu'ru'fa");
   const [sampleCandidates, setSampleCandidates] = useState(['水杉输入法', '水杉', '水扇', '税收', '随身']);
   const [sampleTranslations, setSampleTranslations] = useState<string[]>(['metasequoia', '', '', '', '']);
+  const [samplePos, setSamplePos] = useState<string[]>(['n.', '', '', '', '']);
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   const [selectedDecorationIndex, setSelectedDecorationIndex] = useState<number | null>(null);
@@ -34,11 +61,33 @@ export const App: React.FC = () => {
   const [isDarkMode, setIsDarkMode] = useState(false);
 
   // 三栏宽度与拖拽状态
-  const [leftWidth, setLeftWidth] = useState(320);
-  const [rightWidth, setRightWidth] = useState(340);
+  const [leftWidth, setLeftWidth] = useState(DEFAULT_LEFT);
+  const [rightWidth, setRightWidth] = useState(DEFAULT_RIGHT);
   const [draggingSide, setDraggingSide] = useState<'left' | 'right' | null>(null);
   const dragRef = useRef<{ side: 'left' | 'right'; startX: number; startWidth: number } | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  // 拖拽回调里要读最新的左右宽度，用 ref 同步，避免把宽度塞进 effect 依赖导致每帧重装监听。
+  const widthsRef = useRef({ left: DEFAULT_LEFT, right: DEFAULT_RIGHT });
+  widthsRef.current = { left: leftWidth, right: rightWidth };
+
+  // 窗口自身缩放时也要守住中间栏。拖拽只覆盖了「用户改宽度」这一条路径，
+  // flex 会无条件压 flex-1 那一栏，所以这里补一条 resize 兜底。
+  useEffect(() => {
+    const sync = () => {
+      const total = bodyRef.current?.clientWidth ?? window.innerWidth;
+      const clamped = clampSideWidths(widthsRef.current.left, widthsRef.current.right, total);
+      if (clamped.left !== widthsRef.current.left) setLeftWidth(clamped.left);
+      if (clamped.right !== widthsRef.current.right) setRightWidth(clamped.right);
+    };
+    sync();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', sync);
+      return () => window.removeEventListener('resize', sync);
+    }
+    const observer = new ResizeObserver(sync);
+    if (bodyRef.current) observer.observe(bodyRef.current);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!draggingSide) return;
@@ -47,8 +96,9 @@ export const App: React.FC = () => {
       if (!drag) return;
       const delta = e.clientX - drag.startX;
       const total = bodyRef.current?.clientWidth ?? window.innerWidth;
-      const other = drag.side === 'left' ? rightWidth : leftWidth;
-      const maxWidth = Math.min(MAX_SIDE, Math.max(MIN_SIDE, total - other - MIN_CENTER));
+      const other = drag.side === 'left' ? widthsRef.current.right : widthsRef.current.left;
+      const budget = Math.max(MIN_SIDE, total - other - MIN_CENTER);
+      const maxWidth = Math.min(MAX_SIDE, budget);
       const raw = drag.side === 'left' ? drag.startWidth + delta : drag.startWidth - delta;
       const next = Math.max(MIN_SIDE, Math.min(maxWidth, raw));
       if (drag.side === 'left') setLeftWidth(next);
@@ -73,12 +123,31 @@ export const App: React.FC = () => {
   };
 
   const resetWidths = () => {
-    setLeftWidth(320);
-    setRightWidth(340);
+    setLeftWidth(DEFAULT_LEFT);
+    setRightWidth(DEFAULT_RIGHT);
   };
 
   useEffect(() => {
     loadTemplate(SKIN_TEMPLATES[0]);
+  }, []);
+
+  // 自己 createObjectURL 出来的地址要记着，替换同名素材、切模板、组件卸载三处都要释放。
+  // data URL（模板内置图、SSF 解出来的图）不是 object URL，不能 revoke。
+  const ownedUrlsRef = useRef<Set<string>>(new Set());
+  const releaseAssets = (map: Map<string, SkinAsset>) => {
+    for (const asset of map.values()) {
+      if (ownedUrlsRef.current.has(asset.blobUrl)) {
+        URL.revokeObjectURL(asset.blobUrl);
+        ownedUrlsRef.current.delete(asset.blobUrl);
+      }
+    }
+  };
+  useEffect(() => {
+    const owned = ownedUrlsRef.current;
+    return () => {
+      for (const url of owned) URL.revokeObjectURL(url);
+      owned.clear();
+    };
   }, []);
 
   const loadTemplate = (tpl: SkinTemplate) => {
@@ -87,21 +156,35 @@ export const App: React.FC = () => {
     for (const [path, dataUrl] of Object.entries(tpl.defaultImages || {})) {
       next.set(path, { path, blobUrl: dataUrl });
     }
-    setAssets(next);
+    setAssets(prev => {
+      releaseAssets(prev);
+      return next;
+    });
     setSelectedDecorationIndex(null);
   };
 
   const handleAddAsset = (path: string, file: File) => {
     const blobUrl = URL.createObjectURL(file);
+    ownedUrlsRef.current.add(blobUrl);
     const img = new Image();
-    img.src = blobUrl;
     img.onload = () => {
       setAssets(prev => {
+        // 同名素材被替换时，旧的那个 object URL 要立刻释放，否则传几次就攒几个。
+        const replaced = prev.get(path);
+        if (replaced && ownedUrlsRef.current.has(replaced.blobUrl)) {
+          URL.revokeObjectURL(replaced.blobUrl);
+          ownedUrlsRef.current.delete(replaced.blobUrl);
+        }
         const next = new Map(prev);
         next.set(path, { path, blobUrl, file, width: img.naturalWidth, height: img.naturalHeight });
         return next;
       });
     };
+    img.onerror = () => {
+      URL.revokeObjectURL(blobUrl);
+      ownedUrlsRef.current.delete(blobUrl);
+    };
+    img.src = blobUrl;
   };
 
   const handleImportSsf = async (file: File) => {
@@ -114,7 +197,10 @@ export const App: React.FC = () => {
         next.set(`assets/${imgName}`, { path: `assets/${imgName}`, blobUrl: dataUrl });
       }
 
-      setAssets(next);
+      setAssets(prev => {
+        releaseAssets(prev);
+        return next;
+      });
       setConfig(result.skinConfig);
       setSelectedDecorationIndex(null);
       if (result.warnings.length > 0) {
@@ -167,23 +253,27 @@ export const App: React.FC = () => {
 
   const handleAddDecorationFromAsset = (pathKey: string) => {
     const asset = assets.get(pathKey);
-    setConfig(prev => {
-      const list = prev.candidate_window.decorations ?? [];
-      const next = [
-        ...list,
-        {
-          image: pathKey,
-          anchor: 'bottom-left' as const,
-          width_dip: asset?.width || 64,
-          height_dip: asset?.height || 64,
-          offset_x_dip: 0,
-          offset_y_dip: 0,
-          z_index: 2
-        }
-      ];
-      setSelectedDecorationIndex(next.length - 1);
-      return { ...prev, candidate_window: { ...prev.candidate_window, decorations: next } };
-    });
+    // 新下标要在 setConfig 之外算：更新函数必须是纯函数，StrictMode 下会跑两次。
+    const newIndex = (config.candidate_window.decorations ?? []).length;
+    setConfig(prev => ({
+      ...prev,
+      candidate_window: {
+        ...prev.candidate_window,
+        decorations: [
+          ...(prev.candidate_window.decorations ?? []),
+          {
+            image: pathKey,
+            anchor: 'bottom-left' as const,
+            width_dip: asset?.width || 64,
+            height_dip: asset?.height || 64,
+            offset_x_dip: 0,
+            offset_y_dip: 0,
+            z_index: 2
+          }
+        ]
+      }
+    }));
+    setSelectedDecorationIndex(newIndex);
   };
 
   const handleUpdateDecoration = (index: number, patch: Partial<NonNullable<SkinV2Config['candidate_window']['decorations']>[number]>) => {
@@ -200,7 +290,12 @@ export const App: React.FC = () => {
       const list = (prev.candidate_window.decorations ?? []).filter((_, i) => i !== index);
       return { ...prev, candidate_window: { ...prev.candidate_window, decorations: list } };
     });
-    setSelectedDecorationIndex(null);
+    // 删中间项时后面的下标整体前移，选中项要跟着挪，删到最后一项则清空。
+    setSelectedDecorationIndex(prev => {
+      if (prev === null) return null;
+      if (prev === index) return null;
+      return prev > index ? prev - 1 : prev;
+    });
   };
 
   const handleSaveSlice = (slice: number[], width: number[], outer: Insets) => {
@@ -263,10 +358,41 @@ export const App: React.FC = () => {
               >
                 浅色
               </button>
+              <span className="ml-3">渲染后端:</span>
+              <button
+                onClick={() => setPreviewBackend('webview2')}
+                title="真实候选窗页面，v2 皮肤的设计目标"
+                className={`px-2 py-0.5 rounded transition ${previewBackend === 'webview2' ? 'bg-emerald-600 text-white font-medium' : ''}`}
+              >
+                WebView2
+              </button>
+              <button
+                onClick={() => setPreviewBackend('d2d')}
+                title="出厂默认后端；v2 的 width_dip / fill / z_index / line_gap 尚未实现"
+                className={`px-2 py-0.5 rounded transition ${previewBackend === 'd2d' ? 'bg-rose-600 text-white font-medium' : ''}`}
+              >
+                D2D
+              </button>
               <span className="ml-3 text-slate-500">基础皮肤: {config.meta.base}</span>
             </div>
 
             <div className="flex items-center gap-3">
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={sampleTranslations.some(t => !!t)}
+                  onChange={e => {
+                    if (e.target.checked) {
+                      setSampleTranslations(['metasequoia', '', '', '', '']);
+                      setSamplePos(['n.', '', '', '', '']);
+                    } else {
+                      setSampleTranslations(['', '', '', '', '']);
+                      setSamplePos(['', '', '', '', '']);
+                    }
+                  }}
+                />
+                候选词翻译
+              </label>
               <span>测试拼音:</span>
               <input
                 type="text"
@@ -277,15 +403,17 @@ export const App: React.FC = () => {
             </div>
           </div>
 
-          <div className={`flex-1 relative flex items-center justify-center p-8 overflow-auto ${isDarkMode ? 'bg-slate-950' : 'bg-slate-200'}`}>
+          <div className={`flex-1 relative flex items-start justify-center p-8 overflow-auto ${isDarkMode ? 'bg-slate-950' : 'bg-slate-200'}`}>
             <CandidatePreview
               config={config}
               assets={assets}
               layoutMode={layoutMode}
               theme={previewTheme}
+              backend={previewBackend}
               samplePinyin={samplePinyin}
               sampleCandidates={sampleCandidates}
               sampleTranslations={sampleTranslations}
+              samplePos={samplePos}
               selectedIndex={selectedIndex}
               onSelectCandidate={setSelectedIndex}
               onUpdateDecorationOffset={(index, offset) =>
@@ -299,7 +427,11 @@ export const App: React.FC = () => {
           <div className={`h-7 border-t px-4 flex items-center justify-between text-[11px] ${isDarkMode ? 'border-slate-800 text-slate-500 bg-slate-900/60' : 'border-slate-200 text-slate-500 bg-white'}`}>
             <span>拖拽挂件即可微调 offset，正数向右向下，与水杉两端语义一致</span>
             <span className="flex items-center gap-3">
-              <span>渲染规则对齐 ui-html/webview2/candwnd</span>
+              <span>
+                {previewBackend === 'webview2'
+                  ? '渲染规则对齐 ui-html/webview2/candwnd'
+                  : 'D2D 对齐 candidate_presenter.cpp 与 ui/src/Layout.cpp'}
+              </span>
               <button onClick={resetWidths} className="underline hover:text-emerald-500">
                 重置栏宽
               </button>

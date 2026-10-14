@@ -1,14 +1,18 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Header } from './components/Header';
 import { CandidatePreview, PreviewBackend } from './components/CandidatePreview';
 import { AssetManager } from './components/AssetManager';
 import { ConfigPanel } from './components/ConfigPanel';
 import { SliceModal } from './components/SliceModal';
+import { SampleDataEditor } from './components/SampleDataEditor';
 
 import { Insets, LayoutMode, SkinAsset, SkinV2Config, ThemeName } from './types/skin';
 import { SKIN_TEMPLATES, SkinTemplate } from './constants/templates';
 import { processSsfArchive } from './utils/ssf';
 import { exportSkinPackage, downloadBlob } from './utils/exporter';
+import { validateSkinConfig } from './utils/toml';
+import { loadSession, saveSession } from './utils/session';
+import { importSkinFiles, importSkinToml, importSkinZip, referencedImages, ImportedSkin } from './utils/importer';
 
 const DEFAULT_SLICE = (w: number, h: number) =>
   Math.max(1, Math.min(64, Math.round(Math.min(w || 32, h || 32) * 0.2)));
@@ -59,6 +63,8 @@ export const App: React.FC = () => {
   const [selectedDecorationIndex, setSelectedDecorationIndex] = useState<number | null>(null);
   const [sliceModalOpen, setSliceModalOpen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
+  // 会话恢复或导入后的提示，展示一次即可。
+  const [restoredNotice, setRestoredNotice] = useState<string | null>(null);
 
   // 三栏宽度与拖拽状态
   const [leftWidth, setLeftWidth] = useState(DEFAULT_LEFT);
@@ -127,9 +133,60 @@ export const App: React.FC = () => {
     setRightWidth(DEFAULT_RIGHT);
   };
 
+  // 启动时恢复上次的会话；没有存档才落到第一个模板。
+  // 恢复要等首次渲染之后再做一次：StrictMode 会把挂载期的 effect 跑两遍，若恢复与保存
+  // 在同一次挂载里竞争，第二次恢复会读到被初始状态覆盖的存档、刷新后回到默认值。
+  const [hydrated, setHydrated] = useState(false);
   useEffect(() => {
-    loadTemplate(SKIN_TEMPLATES[0]);
+    const restored = loadSession();
+    if (restored) {
+      const s = restored.session;
+      setConfig(s.config);
+      setLayoutMode(s.layoutMode);
+      setPreviewTheme(s.previewTheme);
+      setPreviewBackend(s.previewBackend);
+      setSamplePinyin(s.samplePinyin);
+      setSampleCandidates(s.sampleCandidates.length ? s.sampleCandidates : ['水杉输入法']);
+      setSampleTranslations(s.sampleTranslations);
+      setSamplePos(s.samplePos);
+      setSelectedIndex(s.selectedIndex);
+      setRestoredNotice(
+        restored.issues.length > 0
+          ? `已恢复上次的编辑，但这份配置有 ${restored.issues.length} 处不合法，导出会被拦下。`
+          : '已恢复上次未导出的编辑。'
+      );
+    } else {
+      loadTemplate(SKIN_TEMPLATES[0]);
+    }
+    setHydrated(true);
   }, []);
+
+  // 会话自动落盘。assets 不进存档，位图靠导出/导入流转。
+  // hydrated 为 false 时这一轮是初始状态，不能覆盖存档。
+  useEffect(() => {
+    if (!hydrated) return;
+    saveSession({
+      config,
+      layoutMode,
+      previewTheme,
+      previewBackend,
+      samplePinyin,
+      sampleCandidates,
+      sampleTranslations,
+      samplePos,
+      selectedIndex
+    });
+  }, [config, layoutMode, previewTheme, previewBackend, samplePinyin, sampleCandidates, sampleTranslations, samplePos, selectedIndex]);
+
+  // 实时校验：导出按钮据此禁用，面板顶部列出问题，不再等到点导出才 alert。
+  const validationIssues = useMemo(() => validateSkinConfig(config).map(i => `${i.field}：${i.message}`), [config]);
+  const assetsMissing = useMemo(() => {
+    const refs = referencedImages(config);
+    return refs.filter(ref => {
+      const alt = ref.startsWith('assets/') ? ref.slice('assets/'.length) : `assets/${ref}`;
+      return !assets.has(ref) && !assets.has(alt);
+    });
+  }, [config, assets]);
 
   // 自己 createObjectURL 出来的地址要记着，替换同名素材、切模板、组件卸载三处都要释放。
   // data URL（模板内置图、SSF 解出来的图）不是 object URL，不能 revoke。
@@ -150,6 +207,13 @@ export const App: React.FC = () => {
     };
   }, []);
 
+  // 覆盖编辑中的内容前确认一次，避免模板/导入把手工改的东西直接冲掉。
+  const confirmDiscard = (what: string): boolean => {
+    const touched = JSON.stringify(config) !== JSON.stringify(SKIN_TEMPLATES[0].config) || assets.size > 0;
+    if (!touched) return true;
+    return window.confirm(`载入${what}会覆盖当前编辑中的皮肤，继续吗？`);
+  };
+
   const loadTemplate = (tpl: SkinTemplate) => {
     setConfig(tpl.config);
     const next = new Map<string, SkinAsset>();
@@ -161,6 +225,12 @@ export const App: React.FC = () => {
       return next;
     });
     setSelectedDecorationIndex(null);
+  };
+
+  const handleSelectTemplate = (tpl: SkinTemplate) => {
+    if (!confirmDiscard(`模板「${tpl.name}」`)) return;
+    loadTemplate(tpl);
+    setRestoredNotice(null);
   };
 
   const handleAddAsset = (path: string, file: File) => {
@@ -188,6 +258,7 @@ export const App: React.FC = () => {
   };
 
   const handleImportSsf = async (file: File) => {
+    if (!confirmDiscard('搜狗皮肤')) return;
     try {
       const buffer = await file.arrayBuffer();
       const result = await processSsfArchive(buffer, file.name);
@@ -209,6 +280,48 @@ export const App: React.FC = () => {
     } catch (err) {
       alert(`导入皮肤失败: ${(err as Error).message || err}`);
     }
+  };
+
+  /** 导入已导出的皮肤包（ZIP）或裸 skin.toml。 */
+  const handleImportSkin = async (file: File) => {
+    if (!confirmDiscard('导入的皮肤')) return;
+    try {
+      const result = file.name.toLowerCase().endsWith('.zip')
+        ? await importSkinZip(file)
+        : await importSkinToml(file);
+      applyImported(result);
+    } catch (err) {
+      alert(`导入皮肤失败：${(err as Error).message || err}`);
+    }
+  };
+
+  /** 选中一个皮肤目录（或同时选中 skin.toml 与图片）。 */
+  const handleImportSkinFiles = async (files: File[]) => {
+    if (!confirmDiscard('导入的皮肤')) return;
+    try {
+      applyImported(await importSkinFiles(files));
+    } catch (err) {
+      alert(`导入皮肤失败：${(err as Error).message || err}`);
+    }
+  };
+
+  const applyImported = (result: ImportedSkin) => {
+    const next = new Map<string, SkinAsset>();
+    for (const [path, asset] of result.assets.entries()) {
+      next.set(path, asset);
+      if (asset.blobUrl.startsWith('blob:')) ownedUrlsRef.current.add(asset.blobUrl);
+    }
+    setAssets(prev => {
+      releaseAssets(prev);
+      return next;
+    });
+    // 用导入的配置补全模板默认值，避免缺字段让渲染报错。
+    setConfig({ ...SKIN_TEMPLATES[0].config, ...result.config, meta: { ...SKIN_TEMPLATES[0].config.meta, ...result.config.meta } } as SkinV2Config);
+    setSelectedDecorationIndex(null);
+    const notes: string[] = [];
+    if (result.missingImages.length > 0) notes.push(`缺少图片：${result.missingImages.join('、')}，请放进素材库。`);
+    notes.push(...result.warnings);
+    setRestoredNotice(notes.length ? `已导入 ${result.sourceLabel}。${notes.join(' ')}` : `已导入 ${result.sourceLabel}。`);
   };
 
   const handleExport = async () => {
@@ -286,6 +399,8 @@ export const App: React.FC = () => {
   };
 
   const handleRemoveDecoration = (index: number) => {
+    const dec = (config.candidate_window.decorations ?? [])[index];
+    if (dec && !window.confirm(`删除挂件 #${index}（${dec.anchor} ${dec.image}）？`)) return;
     setConfig(prev => {
       const list = (prev.candidate_window.decorations ?? []).filter((_, i) => i !== index);
       return { ...prev, candidate_window: { ...prev.candidate_window, decorations: list } };
@@ -298,12 +413,52 @@ export const App: React.FC = () => {
     });
   };
 
+  /** 删素材，并清掉引用它的配置字段，避免留下指向不存在文件的悬空引用。 */
+  const handleRemoveAsset = (pathKey: string) => {
+    const cw = config.candidate_window;
+    const refs: string[] = [];
+    if (cw.border_image?.source === pathKey) refs.push('九宫格面板');
+    if (cw.background?.image === pathKey) refs.push('卡片背景');
+    if (cw.decoration?.image === pathKey) refs.push('顶部装饰');
+    if ((cw.decorations ?? []).some(d => d.image === pathKey)) refs.push('自由挂件');
+    if (refs.length > 0 && !window.confirm(`${pathKey} 正被${refs.join('、')}使用，删除后会一并清掉，继续吗？`)) return;
+
+    setAssets(prev => {
+      const next = new Map(prev);
+      const asset = next.get(pathKey);
+      if (asset && ownedUrlsRef.current.has(asset.blobUrl)) {
+        URL.revokeObjectURL(asset.blobUrl);
+        ownedUrlsRef.current.delete(asset.blobUrl);
+      }
+      next.delete(pathKey);
+      return next;
+    });
+    setConfig(prev => {
+      const win = prev.candidate_window;
+      return {
+        ...prev,
+        candidate_window: {
+          ...win,
+          border_image: win.border_image?.source === pathKey ? undefined : win.border_image,
+          background: win.background?.image === pathKey ? undefined : win.background,
+          decoration: win.decoration?.image === pathKey ? undefined : win.decoration,
+          decorations: (win.decorations ?? []).filter(d => d.image !== pathKey)
+        }
+      };
+    });
+  };
+
   const handleSaveSlice = (slice: number[], width: number[], outer: Insets) => {
     setConfig(prev => ({
       ...prev,
       candidate_window: {
         ...prev.candidate_window,
-        border_image: { ...(prev.candidate_window.border_image ?? { source: '' }), slice_dip: slice, width_dip: width },
+        border_image: {
+          ...(prev.candidate_window.border_image ?? { source: '' }),
+          slice_dip: slice,
+          // 空数组表示「沿用 slice」，与 ConfigPanel 的写法一致；存成 [] 会被导出校验判为非法。
+          width_dip: width.length > 0 ? width : undefined
+        },
         outer_insets_dip: outer
       }
     }));
@@ -319,12 +474,28 @@ export const App: React.FC = () => {
         skinName={config.meta.name}
         layoutMode={layoutMode}
         onChangeLayoutMode={setLayoutMode}
-        onSelectTemplate={loadTemplate}
+        onSelectTemplate={handleSelectTemplate}
         onImportSsf={handleImportSsf}
+        onImportSkin={handleImportSkin}
+        onImportSkinFiles={handleImportSkinFiles}
         onExport={handleExport}
+        exportDisabled={validationIssues.length > 0}
         isDarkMode={isDarkMode}
         onToggleTheme={() => setIsDarkMode(!isDarkMode)}
       />
+
+      {restoredNotice && (
+        <div
+          className={`px-4 py-1.5 text-xs flex items-start justify-between gap-3 border-b ${
+            isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-amber-50 border-amber-200 text-amber-900'
+          }`}
+        >
+          <span>{restoredNotice}</span>
+          <button onClick={() => setRestoredNotice(null)} className="shrink-0 underline opacity-70 hover:opacity-100">
+            知道了
+          </button>
+        </div>
+      )}
 
       <div ref={bodyRef} className={`flex-1 flex overflow-hidden ${draggingSide ? 'select-none' : ''}`}>
         <div style={{ width: leftWidth }} className="shrink-0 flex h-full min-w-0">
@@ -332,6 +503,7 @@ export const App: React.FC = () => {
             config={config}
             assets={assets}
             onAddAsset={handleAddAsset}
+            onRemoveAsset={handleRemoveAsset}
             onSetPanelImage={handleSetPanelImage}
             onSetBackgroundImage={handleSetBackgroundImage}
             onAddDecorationFromAsset={handleAddDecorationFromAsset}
@@ -382,12 +554,15 @@ export const App: React.FC = () => {
                   type="checkbox"
                   checked={sampleTranslations.some(t => !!t)}
                   onChange={e => {
+                    const n = Math.max(1, sampleCandidates.length);
                     if (e.target.checked) {
-                      setSampleTranslations(['metasequoia', '', '', '', '']);
-                      setSamplePos(['n.', '', '', '', '']);
+                      const tr = Array.from({ length: n }, (_, i) => (i === 0 ? 'metasequoia' : ''));
+                      const ps = Array.from({ length: n }, (_, i) => (i === 0 ? 'n.' : ''));
+                      setSampleTranslations(tr);
+                      setSamplePos(ps);
                     } else {
-                      setSampleTranslations(['', '', '', '', '']);
-                      setSamplePos(['', '', '', '', '']);
+                      setSampleTranslations(Array.from({ length: n }, () => ''));
+                      setSamplePos(Array.from({ length: n }, () => ''));
                     }
                   }}
                 />
@@ -402,6 +577,20 @@ export const App: React.FC = () => {
               />
             </div>
           </div>
+
+          <SampleDataEditor
+            pinyin={samplePinyin}
+            candidates={sampleCandidates}
+            translations={sampleTranslations}
+            pos={samplePos}
+            selectedIndex={selectedIndex}
+            isDarkMode={isDarkMode}
+            onPinyin={setSamplePinyin}
+            onCandidates={setSampleCandidates}
+            onTranslations={setSampleTranslations}
+            onPos={setSamplePos}
+            onSelectedIndex={setSelectedIndex}
+          />
 
           <div className={`flex-1 relative flex items-start justify-center p-8 overflow-auto ${isDarkMode ? 'bg-slate-950' : 'bg-slate-200'}`}>
             <CandidatePreview
@@ -424,8 +613,37 @@ export const App: React.FC = () => {
             />
           </div>
 
+          {(validationIssues.length > 0 || assetsMissing.length > 0) && (
+            <div
+              className={`max-h-32 overflow-y-auto border-t px-4 py-2 text-[11px] ${
+                isDarkMode ? 'border-slate-800 bg-rose-950/40 text-rose-200' : 'border-rose-200 bg-rose-50 text-rose-800'
+              }`}
+            >
+              {validationIssues.length > 0 && (
+                <>
+                  <div className="font-medium mb-0.5">导出会被水杉拒绝（{validationIssues.length}）</div>
+                  <ul className="list-disc pl-4 space-y-0.5">
+                    {validationIssues.map((issue, i) => (
+                      <li key={i}>{issue}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              {assetsMissing.length > 0 && (
+                <>
+                  <div className="font-medium mt-1 mb-0.5">缺少图片（{assetsMissing.length}）</div>
+                  <ul className="list-disc pl-4 space-y-0.5">
+                    {assetsMissing.map((p, i) => (
+                      <li key={i}>{p} — 请放进素材库</li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
+          )}
+
           <div className={`h-7 border-t px-4 flex items-center justify-between text-[11px] ${isDarkMode ? 'border-slate-800 text-slate-500 bg-slate-900/60' : 'border-slate-200 text-slate-500 bg-white'}`}>
-            <span>拖拽挂件即可微调 offset，正数向右向下，与水杉两端语义一致</span>
+            <span>拖拽挂件即可微调 offset，正数向右向下，与水杉两端语义一致；改动自动保存到本地</span>
             <span className="flex items-center gap-3">
               <span>
                 {previewBackend === 'webview2'
@@ -450,7 +668,6 @@ export const App: React.FC = () => {
             onRemoveDecoration={handleRemoveDecoration}
             onUpdateDecoration={handleUpdateDecoration}
             isDarkMode={isDarkMode}
-            layoutMode={layoutMode}
           />
         </div>
       </div>

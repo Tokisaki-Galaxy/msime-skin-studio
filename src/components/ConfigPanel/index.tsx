@@ -472,34 +472,54 @@ const NumberField: React.FC<{ label: string; value: number; dark: boolean; onCha
 }) => (
   <div>
     <label className={labelClsFor(dark)}>{label}</label>
-    <input type="number" value={value} onChange={e => onChange(Number(e.target.value))} className={fieldCls(dark)} />
+    <input
+      type="number"
+      value={Number.isFinite(value) ? value : ''}
+      // 清空时不要写 NaN 进配置：空串与非法输入一律忽略，保留上一个有效值。
+      onChange={e => {
+        if (e.target.value.trim() === '') return;
+        const parsed = Number(e.target.value);
+        if (Number.isFinite(parsed)) onChange(parsed);
+      }}
+      className={fieldCls(dark)}
+    />
   </div>
 );
 
-/** 1~4 个值的数组编辑，逗号分隔。 */
+/** 1~4 个值的数组编辑，逗号分隔。空项与非法项忽略，支持中间增删。 */
 const NumberList: React.FC<{ label: string; values: number[]; dark: boolean; onChange: (v: number[]) => void }> = ({
   label,
   values,
   dark,
   onChange
-}) => (
-  <div>
-    <label className={labelClsFor(dark)}>{label}</label>
-    <input
-      type="text"
-      value={values.join(', ')}
-      placeholder="留空"
-      onChange={e => {
-        const parsed = e.target.value
-          .split(',')
-          .map(s => Number(s.trim()))
-          .filter(n => !Number.isNaN(n));
-        onChange(parsed);
-      }}
-      className={`${fieldCls(dark)} font-mono`}
-    />
-  </div>
-);
+}) => {
+  // 文本框保留原始串，否则输入 "16," 的中间态会被立刻解析掉、光标跳走。
+  const [text, setText] = useState<string | null>(null);
+  const shown = text ?? values.join(', ');
+  return (
+    <div>
+      <label className={labelClsFor(dark)}>{label}</label>
+      <input
+        type="text"
+        value={shown}
+        placeholder="留空"
+        onChange={e => {
+          const raw = e.target.value;
+          setText(raw);
+          const parsed = raw
+            .split(',')
+            .map(s => s.trim())
+            .filter(s => s !== '')
+            .map(Number)
+            .filter(n => Number.isFinite(n));
+          onChange(parsed);
+        }}
+        onBlur={() => setText(null)}
+        className={`${fieldCls(dark)} font-mono`}
+      />
+    </div>
+  );
+};
 
 const InsetsEditor: React.FC<{
   label: string;
@@ -516,7 +536,13 @@ const InsetsEditor: React.FC<{
           type="number"
           title={side}
           value={insets?.[side] ?? 0}
-          onChange={e => onChange({ ...(insets || { top: 0, right: 0, bottom: 0, left: 0 }), [side]: Number(e.target.value) })}
+          // 清空时保留上一个有效值，避免把 NaN 写进配置。
+          onChange={e => {
+            if (e.target.value.trim() === '') return;
+            const parsed = Number(e.target.value);
+            if (!Number.isFinite(parsed)) return;
+            onChange({ ...(insets || { top: 0, right: 0, bottom: 0, left: 0 }), [side]: parsed });
+          }}
           className={`${fieldCls(dark)} mt-0 text-center`}
         />
       ))}

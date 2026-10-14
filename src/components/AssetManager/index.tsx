@@ -5,6 +5,7 @@ interface AssetManagerProps {
   config: SkinV2Config;
   assets: Map<string, SkinAsset>;
   onAddAsset: (path: string, file: File) => void;
+  onRemoveAsset: (path: string) => void;
   onSetPanelImage: (path: string) => void;
   onSetBackgroundImage: (path: string) => void;
   onAddDecorationFromAsset: (path: string) => void;
@@ -16,6 +17,7 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
   config,
   assets,
   onAddAsset,
+  onRemoveAsset,
   onSetPanelImage,
   onSetBackgroundImage,
   onAddDecorationFromAsset,
@@ -29,6 +31,8 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
     const files = e.target.files;
     if (!files) return;
     for (let i = 0; i < files.length; i++) onAddAsset(`assets/${files[i].name}`, files[i]);
+    // 同一个文件连选两次时不清空 value 不会触发 change，导入会「没反应」。
+    e.target.value = '';
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -139,6 +143,13 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
                     className={`text-[10px] px-1.5 py-0.5 rounded ${decorationImages.has(pathKey) ? 'bg-purple-600 text-white' : isDarkMode ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
                   >
                     + 挂件
+                  </button>
+                  <button
+                    onClick={() => onRemoveAsset(pathKey)}
+                    title="删除素材，并清掉引用它的字段"
+                    className={`text-[10px] px-1.5 py-0.5 rounded ${isDarkMode ? 'bg-slate-700 text-rose-300 hover:bg-rose-900/60' : 'bg-slate-100 text-rose-600 hover:bg-rose-100'}`}
+                  >
+                    删除
                   </button>
                 </div>
               </div>

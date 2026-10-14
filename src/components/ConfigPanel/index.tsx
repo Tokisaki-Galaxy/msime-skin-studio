@@ -306,7 +306,28 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
             {colorInput('dark', 'selected_text', '选中文字 selected_text', '#ffffff')}
             {colorInput('dark', 'selected', '选中底色 selected', '#3e3e3eb9')}
             {colorInput('dark', 'hover', '悬停底色 hover', '#414141')}
+            {colorInput('dark', 'preedit_caret', '预编辑光标 preedit_caret', '#6b69d6')}
+            {colorInput('dark', 'selected_number', '选中序号 selected_number', '#ffffff')}
+            {colorInput('dark', 'selected_bar', '选中条 selected_bar', '#6b69d6')}
+            {colorInput('dark', 'translation', '翻译 text（translation）', '#9a6dd7')}
+            {colorInput('dark', 'translation_pos', '翻译词性 translation_pos', '#e255a180')}
+            {colorInput('dark', 'translation_separator', '翻译分隔符 translation_separator', '#9a6dd773')}
+            {colorInput('dark', 'selected_translation', '选中翻译 selected_translation', '#ffffff')}
+            {colorInput('dark', 'preedit_background', '预编辑底色 preedit_background', '#00000000')}
+            {colorInput('dark', 'preedit_divider', '预编辑分隔线 preedit_divider', '#00000000')}
           </div>
+          <label className="flex items-center gap-1.5 text-xs pt-1">
+            <span className={labelCls}>选中条 show_selected_bar</span>
+            <select
+              value={config.candidate.dark?.show_selected_bar === undefined ? '' : String(config.candidate.dark.show_selected_bar)}
+              onChange={e => updateColor('dark', 'show_selected_bar', e.target.value === '' ? undefined : e.target.value === 'true')}
+              className={`${inputCls} mt-0`}
+            >
+              <option value="">沿用 base</option>
+              <option value="true">true</option>
+              <option value="false">false</option>
+            </select>
+          </label>
         </section>
 
         <section className="space-y-3">
@@ -321,7 +342,28 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
             {colorInput('light', 'selected_text', '选中文字 selected_text', '#1a1a1a')}
             {colorInput('light', 'selected', '选中底色 selected', '#e8e8e8')}
             {colorInput('light', 'hover', '悬停底色 hover', '#ececec')}
+            {colorInput('light', 'preedit_caret', '预编辑光标 preedit_caret', '#6f6bc7')}
+            {colorInput('light', 'selected_number', '选中序号 selected_number', '#1a1a1a')}
+            {colorInput('light', 'selected_bar', '选中条 selected_bar', '#6f6bc7')}
+            {colorInput('light', 'translation', '翻译 text（translation）', '#6940a5')}
+            {colorInput('light', 'translation_pos', '翻译词性 translation_pos', '#ad1a7280')}
+            {colorInput('light', 'translation_separator', '翻译分隔符 translation_separator', '#6940a573')}
+            {colorInput('light', 'selected_translation', '选中翻译 selected_translation', '#1a1a1a')}
+            {colorInput('light', 'preedit_background', '预编辑底色 preedit_background', '#00000000')}
+            {colorInput('light', 'preedit_divider', '预编辑分隔线 preedit_divider', '#00000000')}
           </div>
+          <label className="flex items-center gap-1.5 text-xs pt-1">
+            <span className={labelCls}>选中条 show_selected_bar</span>
+            <select
+              value={config.candidate.light?.show_selected_bar === undefined ? '' : String(config.candidate.light.show_selected_bar)}
+              onChange={e => updateColor('light', 'show_selected_bar', e.target.value === '' ? undefined : e.target.value === 'true')}
+              className={`${inputCls} mt-0`}
+            >
+              <option value="">沿用 base</option>
+              <option value="true">true</option>
+              <option value="false">false</option>
+            </select>
+          </label>
         </section>
 
         {/* 挂件 */}

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { DecorationAnchor, SkinAsset, SkinV2Config, ThemeName, LayoutMode } from '../../types/skin';
 import { baseSkinCss, SHARED_CANDIDATE_CSS, HORIZONTAL_PAGE_CSS } from '../../skins';
 import { buildHostVars, buildSkinOverrideCss, outerInsetsOf } from '../../utils/skinCss';
-import { buildD2dPreviewCss } from '../../utils/d2dCss';
+import { buildD2dOverrideCss } from '../../utils/d2dCss';
 
 export type PreviewBackend = 'webview2' | 'd2d';
 
@@ -84,7 +84,14 @@ export const CandidatePreview: React.FC<CandidatePreviewProps> = ({
     const overrideCss =
       backend === 'webview2'
         ? buildSkinOverrideCss(config, layoutMode, theme, assetUrl)
-        : buildD2dPreviewCss(config, layoutMode, theme, assetUrl);
+        : buildD2dOverrideCss(config, layoutMode, theme, assetUrl);
+
+    // fit_content 去掉各皮肤 .container 的 7em 下限，只留皮肤声明的 min_width_dip 与装饰图
+    // 宽度。宿主把它拼在内置皮肤 CSS 之后（windows_webview2_skin.cpp:681-686）。
+    const fitContentCss = config.candidate_window.fit_content
+      ? '\nhtml[data-fit-content="on"] .container:not(:empty) { min-width: ' +
+        'max(var(--msime-skin-min-width, 0px), var(--msime-skin-decoration-width, 0px)); }\n'
+      : '';
 
     // 竖排页头没有 .cand-translation 规则，翻译靠皮肤 CSS 的 margin-left 同行显示；
     // 横排由页面头给出 display:block，翻译落到候选文字下方。这里按布局分流。
@@ -153,7 +160,7 @@ export const CandidatePreview: React.FC<CandidatePreviewProps> = ({
   ${translationCss}
 </style>
 <style>${SHARED_CANDIDATE_CSS}</style>
-<style id="built-in-candidate-skin">${baseCss}</style>
+<style id="built-in-candidate-skin">${baseCss}${fitContentCss}</style>
 <style id="external-candidate-skin-vars">:root{${hostVars}}</style>
 <style id="external-candidate-skin">${overrideCss}</style>
 </head>

@@ -59,7 +59,7 @@ function scaleRgba(color: string, factor: number): string {
   return `rgba(${match[1]}, ${match[2]}, ${match[3]}, ${Number(a.toFixed(3))})`;
 }
 
-function colorLines(colors: CandidateColors | undefined): string {
+export function colorLines(colors: CandidateColors | undefined): string {
   if (!colors) return '';
   let css = '';
   const add = (value: string | undefined, selector: string, property: string) => {

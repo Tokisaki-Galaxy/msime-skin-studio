@@ -1,19 +1,24 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import JSZip from 'jszip';
 import { processSsfArchive } from './src/utils/ssf';
 import { serializeSkinToml } from './src/utils/toml';
+import { isSafeSkinId } from './src/utils/exporter';
 
 async function main() {
   const args = process.argv.slice(2);
   if (args.length === 0) {
     console.log(`
-水杉输入法皮肤转换 CLI 工具
+水杉输入法皮肤转换 CLI
+
 用法:
-  node cli.mjs <ssf文件路径> [输出目录]
+  node cli.mjs <ssf文件路径> [输出根目录]
+
+输出结构（水杉要求皮肤目录名与 skin.toml 的 id 一致）:
+  <输出根目录>/<id>/skin.toml
+  <输出根目录>/<id>/assets/...
 
 示例:
-  node cli.mjs "C:\\Users\\User\\Downloads\\航海.ssf" "./output/航海"
+  node cli.mjs "C:\\Users\\User\\Downloads\\航海.ssf" "./output"
 `);
     process.exit(0);
   }
@@ -24,40 +29,42 @@ async function main() {
     process.exit(1);
   }
 
-  const defaultOutDir = path.join(path.dirname(ssfPath), path.basename(ssfPath, path.extname(ssfPath)));
-  const outDir = path.resolve(args[1] || defaultOutDir);
+  const rootDir = path.resolve(args[1] || path.dirname(ssfPath));
 
   console.log(`正在读取并转换: ${ssfPath}`);
   const buffer = fs.readFileSync(ssfPath);
   const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
-  const result = await processSsfArchive(arrayBuffer, path.basename(ssfPath));
+  const { skinConfig, images, warnings } = await processSsfArchive(arrayBuffer, path.basename(ssfPath));
 
-  if (!fs.existsSync(outDir)) {
-    fs.mkdirSync(outDir, { recursive: true });
+  const id = skinConfig.meta.id;
+  if (!isSafeSkinId(id)) {
+    console.error(`错误: 生成的 id "${id}" 不合法，无法作为水杉皮肤目录名`);
+    process.exit(1);
   }
 
-  const assetsDir = path.join(outDir, 'assets');
-  if (!fs.existsSync(assetsDir)) {
-    fs.mkdirSync(assetsDir, { recursive: true });
-  }
+  const skinDir = path.join(rootDir, id);
+  const assetsDir = path.join(skinDir, 'assets');
+  fs.mkdirSync(assetsDir, { recursive: true });
 
-  // 1. 写入 skin.toml
-  const tomlStr = serializeSkinToml(result.skinConfig);
-  fs.writeFileSync(path.join(outDir, 'skin.toml'), tomlStr, 'utf-8');
-  console.log(`✓ 已生成配置规范: ${path.join(outDir, 'skin.toml')}`);
+  fs.writeFileSync(path.join(skinDir, 'skin.toml'), serializeSkinToml(skinConfig), 'utf-8');
+  console.log(`✓ 已生成配置: ${path.join(skinDir, 'skin.toml')}`);
 
-  // 2. 写入图片资源
   let count = 0;
-  for (const [imgName, dataUrl] of Object.entries(result.images)) {
+  for (const [imgName, dataUrl] of Object.entries(images)) {
     const base64Data = dataUrl.split(',')[1];
     if (base64Data) {
-      const filePath = path.join(assetsDir, imgName);
-      fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
+      fs.writeFileSync(path.join(assetsDir, imgName), Buffer.from(base64Data, 'base64'));
       count++;
     }
   }
   console.log(`✓ 已提取贴图素材: ${count} 张 -> ${assetsDir}`);
-  console.log(`\n🎉 转换完成！您可以直接将 "${outDir}" 文件夹放入水杉输入法的皮肤数据目录。`);
+
+  if (warnings.length > 0) {
+    console.log('\n需要人工确认:');
+    for (const w of warnings) console.log(`  · ${w}`);
+  }
+
+  console.log(`\n把 "${skinDir}" 整个放进水杉数据目录的 skins\\ 下即可。`);
 }
 
 main().catch(err => {

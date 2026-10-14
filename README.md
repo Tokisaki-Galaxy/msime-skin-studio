@@ -1,37 +1,44 @@
 # 水杉输入法皮肤工坊
 
-水杉输入法（MetasequoiaIME）Schema v2 规范皮肤可视化编辑器与仿真器，无需 C++ 编译环境即可创作、调试、测试与转换皮肤。
+水杉输入法（MetasequoiaIME）`schema_version = 2` 外部皮肤的可视化编辑器与仿真器。无需 C++ 编译环境即可创作、调试、转换皮肤。
 
-## 特色能力
+字段名、层级与取值范围对齐 `msime-windows/server/src/skin/candidate_skin_catalog.h`，导出的 `skin.toml` 能被水杉原样加载。
 
-1. 原创皮肤可视化设计
-   提供开箱即用的经典模版（现代磨砂、水杉经典、立绘挂件款），支持拖拽上传背景与挂件。
-2. 可视化九宫格切片调节
-   提供四条可拖动标定参考线，所见即所得调试切片与边框宽度。
-3. 真实候选窗口打字仿真
-   完整复刻官方 Web 候选窗排版逻辑，支持横竖排切换、实时模拟输入打字、首选高亮与翻页。
-4. 搜狗皮肤（SSF）双向解构与转换
-   纯 JS 实现了搜狗 SSF 格式解密与 ZIP 解压，兼容加密与未加密 SSF，拖入即可自动解析为水杉 v2 规范。
-5. 自由挂件磁吸与管理
-   支持多层独立挂件，可配置挂载点（窗口/首选项）、九向锚点、尺寸与坐标微调。
-6. 一键导出标准皮肤包
-   自动打包规范结构为 ZIP 文件，解压即可直接放入水杉输入法数据目录使用。
+## 仿真精度
 
-## 启动与使用
+- 候选窗页面直接复用 `ui-html/webview2/candwnd/` 的六个内置皮肤 CSS，以及同一套 DOM 结构（`.candidate > .containerParent > .container > .row.pinyin / .row-wrapper > .row.cand`）。
+- v2 覆盖样式逐条对照 `server/src/webview2/windows_webview2_skin.cpp` 生成：九宫格边框、`content_insets_dip`（从面板外缘量起并扣掉边框宽度）、`outer_insets_dip`、`line_gap_dip`、自由挂件的锚点与 `z_index`、以及全部配色键。
+- `src/skins/` 下的 CSS 是从 `msime-windows` 拷来的副本。水杉那边改了基础皮肤，重新拷一次即可。
 
-### 网页版（推荐）
+## 能力
+
+1. 三套起手模板：纯色卡片、九宫格贴图面板加立绘、深色配色。
+2. 可视化九宫格标定：拖动参考线调 `slice_dip`、`width_dip` 与 `outer_insets_dip`，绿色区域就是可拉伸区。
+3. 自由挂件：层数不限，九种锚点，拖拽直接改 `offset_x_dip` / `offset_y_dip`（正数向右向下）。
+4. 候选窗打字仿真：横竖排切换、深浅主题切换、首选高亮、翻页箭头。
+5. 搜狗皮肤（`.ssf`）导入：纯 JS 解密与解包，转成 v2 规范。
+6. 一键导出：打包成 `<id>/skin.toml` + `<id>/assets/`，解压后直接放进水杉数据目录。
+
+## 启动
 
 ```bash
 pnpm install
 pnpm dev
 ```
 
-浏览器打开 `http://localhost:3322` 即可进行可视化编辑。
+打开 `http://localhost:3322`。
 
-### 命令行批量转换搜狗皮肤
-
-无需打开浏览器，直接使用 CLI 转换 `.ssf` 文件：
+## 命令行批量转换
 
 ```bash
-pnpm convert "C:\Users\username\Desktop\test.ssf" "./output_skin_dir"
+pnpm convert "C:\Users\username\Desktop\test.ssf" "./output"
 ```
+
+产出 `./output/<id>/`，可以直接放进水杉的 `skins\` 目录。转换完会打印需要人工确认的项。
+
+## 已知限制
+
+- 水杉 v2 每个皮肤只有一张面板图，搜狗皮肤里独立的 `Scheme_H2` / `Scheme_V1` / `Scheme_V2` 只取 `Scheme_H1`。
+- 搜狗 `customN_align` 的十个数只解出了第 6、8 位（0 = 左/上，2 = 右/下），其余位含义未知，挂件位置需要人工核对。
+- 搜狗 `*_marge` 与窗口边距的精确关系尚未完全确认，复杂立绘皮肤的 `content_insets_dip` 可能要手工调。
+- 模板内置的占位贴图是 SVG data URL，只方便浏览器预览。导出前请换成真正的 PNG。

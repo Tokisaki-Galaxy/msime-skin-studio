@@ -1,8 +1,15 @@
-# Cloudflare Pages 项目配置。
-# 用 Wrangler 直接部署时以这个文件为准；走 Git 集成时它的 pages_build_output_dir
-# 也会与后台的「构建输出目录」一致。
-# 本项目是纯静态前端，没有任何 Pages Functions，所以这里只有构建输出目录一项。
+# Cloudflare Workers 静态资源项目配置。
+# 本项目是纯静态前端：没有 Worker 脚本、没有后端、没有环境变量。
+# 所以这里不写 main，只声明 assets 目录，Worker 会在部署时把 dist 作为静态资源上传。
+#
+# 请求默认走 asset-first：命中静态文件就直接返回，不会唤起任何脚本，
+# 因此不消耗 Workers 免费版每天 100,000 次的「调用 Worker 脚本」额度。
 
 name = "msime-skin-studio"
-pages_build_output_dir = "./dist"
 compatibility_date = "2026-10-16"
+
+[assets]
+directory = "./dist"
+# 本项目是单页应用，没有客户端路由，但保留 SPA 兜底：
+# 直接访问 /whatever 时返回 index.html 而不是 404，行为更符合静态站点的直觉。
+not_found_handling = "single-page-application"

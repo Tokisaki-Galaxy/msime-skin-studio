@@ -32,35 +32,34 @@ pnpm dev
 
 ## 部署
 
-这是一个纯静态前端应用：没有后端、没有 Pages Functions、不需要任何环境变量。SSF 解密、ZIP 打包、TOML 序列化全部在浏览器里完成，所以部署只需要托管构建产物。
+这是一个纯静态前端应用：没有 Worker 脚本、没有后端、不需要任何环境变量。SSF 解密、ZIP 打包、TOML 序列化全部在浏览器里完成，所以部署只需要托管构建产物。
 
-### Cloudflare Pages（Git 集成，推荐）
+### Cloudflare Workers（Git 集成）
 
-在 Cloudflare 后台新建 Pages 项目并连上本仓库，构建配置：
+在 Cloudflare 后台新建 Worker 并连上本仓库，构建配置：
 
 | 项目 | 值 |
 | --- | --- |
 | 构建命令 | `pnpm build` |
-| 构建输出目录 | `dist` |
-| Node 版本 | `22`（环境变量 `NODE_VERSION`） |
-| pnpm 版本 | `11.22.0`（环境变量 `PNPM_VERSION`，与 `package.json` 的 `packageManager` 一致） |
+| 部署命令 | `npx wrangler deploy`（默认值，无需修改） |
+| 包管理器与 Node | 无需设置 |
 
-提交到 `master` 会自动发布生产环境，其他分支生成预览 URL。
+包管理器与 Node 版本由 Cloudflare 自动检测：它读 `package.json` 的 `packageManager` 字段决定用哪个 pnpm，Node 则用构建环境自带的版本。本项目的构建日志里检测结果是 `pnpm@11.22.0` 与 `nodejs@24.18.0`，构建与部署都正常，所以不需要额外配环境变量。
 
-### Cloudflare Pages（Wrangler 直传）
+提交到 `master` 会自动发布生产环境，其他分支生成预览 URL。部署命令读 `wrangler.toml` 里的 `[assets]`，把 `dist` 作为静态资源上传。
+
+请求默认走 asset-first：命中静态文件就直接返回，不会唤起任何脚本。因此不消耗 Workers 免费版每天 100,000 次的「调用 Worker 脚本」额度，静态资源请求是免费无限的。
+
+### Cloudflare Workers（Wrangler 直传）
 
 不想让 Cloudflare 拉仓库时，用本地构建加直传：
 
 ```bash
 pnpm build
-pnpm exec wrangler pages deploy dist --project-name=msime-skin-studio
+pnpm exec wrangler deploy
 ```
 
-需要 `CLOUDFLARE_API_TOKEN` 与 `CLOUDFLARE_ACCOUNT_ID` 两个环境变量。`wrangler.toml` 里的 `pages_build_output_dir` 已指向 `dist`。
-
-也可以让 CI 代劳：`.github/workflows/ci.yml` 里的 `deploy` job 已经写好。默认不启用，需要两手准备才生效——仓库变量 `CLOUDFLARE_PAGES_DEPLOY` 设为 `true`，并配好 `CLOUDFLARE_API_TOKEN` 与 `CLOUDFLARE_ACCOUNT_ID` 两个 secret。之所以用显式开关而不是「有密钥就自动部署」，是因为 Cloudflare 明确不支持同一个 Pages 项目在「Git 集成」与「直传」之间切换，而组织级同名密钥会导致误触发。
-
-CI 里的 `verify` job 与上述选择无关，有无密钥都会跑测试与构建。
+需要 `CLOUDFLARE_API_TOKEN` 与 `CLOUDFLARE_ACCOUNT_ID` 两个环境变量。注意同一个 Worker 在「Git 集成」与「本地直传」之间只能选一种部署路径，别同时用。
 
 ### 其他静态托管
 

@@ -1,16 +1,10 @@
-name: CI 与部署
+name: CI
 
-# 本项目是纯静态前端：没有后端、没有 Pages Functions、没有环境变量。
+# 本项目是纯静态前端：没有 Worker 脚本、没有后端、没有 Pages Functions、没有环境变量。
 #
-# CI 默认只做质量门禁：跑测试、跑构建。这与 Cloudflare Pages 的「Git 集成」
-# 不冲突，也不需要任何密钥。
-#
-# 部署默认走 Cloudflare 的 Git 集成（在后台连仓库即可），此时不需要本 workflow 做任何事。
-# 如果你更想用 Direct Upload（CI 构建后用 wrangler 直传），把仓库变量
-# CLOUDFLARE_PAGES_DEPLOY 设为 true，并配置下面两个 secret，deploy job 才会启用。
-#
-# 之所以用仓库变量而不是「有密钥就自动部署」：Cloudflare 明确不支持同一个 Pages 项目
-# 在 Git 集成与直传之间切换，而在组织级配置了同名密钥时会误触发直传。显式开关更安全。
+# CI 只做质量门禁：跑测试、跑构建。
+# 部署交给 Cloudflare 的 Git 集成（在 Cloudflare 后台连上本仓库即可），
+# 它会在构建后自行执行 `npx wrangler deploy`，这里不再重复一条部署路径。
 
 on:
   push:
@@ -39,7 +33,7 @@ jobs:
         with:
           run_install: false
 
-      # Node 版本对齐 Cloudflare Pages 构建镜像的默认值（22.16.0），少一层不确定性。
+      # Node 版本对齐 Cloudflare 构建环境，少一层不确定性。
       - name: 安装 Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -57,48 +51,9 @@ jobs:
       - name: 构建
         run: pnpm build
 
-      # 构建产物给部署 job 复用，省一次安装与构建。
-      - name: 上传构建产物
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: dist
-          path: dist
-          retention-days: 7
+      # 用与 Cloudflare 相同的方式试跑一次部署，只做校验不真正上传。
+      # 这样 wrangler.toml 写错（比如 assets 目录不存在）会在 PR 上就暴露。
+      - name: 校验部署配置
+        run: pnpm exec wrangler deploy --dry-run
 
-  deploy:
-    name: 部署到 Cloudflare Pages
-    needs: verify
-    # 三重门槛：仅在 master 推送、且显式开启了直传开关时执行。
-    if: >-
-      github.event_name == 'push' &&
-      github.ref == 'refs/heads/master' &&
-      vars.CLOUDFLARE_PAGES_DEPLOY == 'true'
-    runs-on: ubuntu-latest
-    # 这个 job 需要两个 secret，开启开关前请先在仓库里配好，
-    # 否则会在「发布」一步以 wrangler 的认证错误明确失败，而不是静默跳过。
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-    permissions:
-      contents: read
-      # 传了 gitHubToken 时 wrangler-action 会调 GitHub Deployments API。
-      deployments: write
-    environment:
-      name: cloudflare-pages
-      url: ${{ steps.deploy.outputs.deployment-url }}
-    steps:
-      - name: 下载构建产物
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: dist
-          path: dist
-
-      - name: 发布
-        id: deploy
-        uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
-          command: pages deploy dist --project-name=msime-skin-studio
 

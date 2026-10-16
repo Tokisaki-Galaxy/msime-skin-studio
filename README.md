@@ -30,6 +30,46 @@ pnpm dev
 
 打开 `http://localhost:3322`。
 
+## 部署
+
+这是一个纯静态前端应用：没有后端、没有 Pages Functions、不需要任何环境变量。SSF 解密、ZIP 打包、TOML 序列化全部在浏览器里完成，所以部署只需要托管构建产物。
+
+### Cloudflare Pages（Git 集成，推荐）
+
+在 Cloudflare 后台新建 Pages 项目并连上本仓库，构建配置：
+
+| 项目 | 值 |
+| --- | --- |
+| 构建命令 | `pnpm build` |
+| 构建输出目录 | `dist` |
+| Node 版本 | `22`（环境变量 `NODE_VERSION`） |
+| pnpm 版本 | `11.22.0`（环境变量 `PNPM_VERSION`，与 `package.json` 的 `packageManager` 一致） |
+
+提交到 `master` 会自动发布生产环境，其他分支生成预览 URL。
+
+### Cloudflare Pages（Wrangler 直传）
+
+不想让 Cloudflare 拉仓库时，用本地构建加直传：
+
+```bash
+pnpm build
+pnpm exec wrangler pages deploy dist --project-name=msime-skin-studio
+```
+
+需要 `CLOUDFLARE_API_TOKEN` 与 `CLOUDFLARE_ACCOUNT_ID` 两个环境变量。`wrangler.toml` 里的 `pages_build_output_dir` 已指向 `dist`。
+
+也可以让 CI 代劳：`.github/workflows/ci.yml` 里的 `deploy` job 已经写好。默认不启用，需要两手准备才生效——仓库变量 `CLOUDFLARE_PAGES_DEPLOY` 设为 `true`，并配好 `CLOUDFLARE_API_TOKEN` 与 `CLOUDFLARE_ACCOUNT_ID` 两个 secret。之所以用显式开关而不是「有密钥就自动部署」，是因为 Cloudflare 明确不支持同一个 Pages 项目在「Git 集成」与「直传」之间切换，而组织级同名密钥会导致误触发。
+
+CI 里的 `verify` job 与上述选择无关，有无密钥都会跑测试与构建。
+
+### 其他静态托管
+
+Vercel、Netlify、GitHub Pages 等任何静态托管都能直接用，参数同上：构建 `pnpm build`，输出 `dist`。若部署在子路径（例如 GitHub Pages 的项目页），构建时需要加基路径：
+
+```bash
+pnpm exec vite build --base=/msime-skin-studio/
+```
+
 ## 命令行批量转换
 
 ```bash

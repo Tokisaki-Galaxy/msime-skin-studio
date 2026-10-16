@@ -65,3 +65,96 @@ export function hexToRgba(hex: string, alpha: number): string {
   const a = Math.round(Math.min(1, Math.max(0, alpha)) * 1000) / 1000;
   return `rgba(${r}, ${g}, ${b}, ${a})`;
 }
+
+interface ParsedColor {
+  r: number;
+  g: number;
+  b: number;
+  alpha: number;
+  /** 原值是十六进制还是 rgb()/rgba() 写法，决定改 alpha 后保持哪种格式。 */
+  kind: 'hex' | 'rgb';
+}
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  return Math.min(1, Math.max(0, value));
+}
+
+function roundAlpha(value: number): number {
+  return Math.round(clamp01(value) * 1000) / 1000;
+}
+
+/** 解析水杉认的颜色写法，取不到返回 null。transparent 视作 alpha 0。 */
+function parseColor(color: string | undefined): ParsedColor | null {
+  if (!color) return null;
+  const text = color.trim();
+  if (/^transparent$/i.test(text)) return { r: 0, g: 0, b: 0, alpha: 0, kind: 'rgb' };
+
+  const rgba = text.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)$/i);
+  if (rgba) {
+    return {
+      r: Number(rgba[1]),
+      g: Number(rgba[2]),
+      b: Number(rgba[3]),
+      alpha: rgba[4] === undefined ? 1 : clamp01(Number(rgba[4])),
+      kind: 'rgb'
+    };
+  }
+
+  const hex = text.replace(/^#/, '');
+  if (!/^[0-9a-fA-F]+$/.test(hex)) return null;
+  if (hex.length === 3 || hex.length === 4) {
+    const r = parseInt(hex[0] + hex[0], 16);
+    const g = parseInt(hex[1] + hex[1], 16);
+    const b = parseInt(hex[2] + hex[2], 16);
+    const alpha = hex.length === 4 ? parseInt(hex[3] + hex[3], 16) / 255 : 1;
+    return { r, g, b, alpha, kind: 'hex' };
+  }
+  if (hex.length === 6 || hex.length === 8) {
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    const alpha = hex.length === 8 ? parseInt(hex.slice(6, 8), 16) / 255 : 1;
+    return { r, g, b, alpha, kind: 'hex' };
+  }
+  return null;
+}
+
+const toHex2 = (value: number) => Math.min(255, Math.max(0, Math.round(value))).toString(16).padStart(2, '0');
+
+/**
+ * 只改颜色的透明度，保留 RGB 与原来的写法家族。
+ * - 十六进制输入输出 #rrggbb（不透明）或 #rrggbbaa
+ * - rgb()/rgba() 输入输出 rgb() 或 rgba()
+ * - color 为空时用 fallback 的 RGB 当基色，alpha 由调用方给
+ * - color 与 fallback 都认不出时原样返回 color，不破坏用户手写的值
+ */
+export function withAlpha(color: string | undefined, alpha: number, fallback?: string): string {
+  const parsed = parseColor(color) ?? (fallback ? parseColor(fallback) : null);
+  if (!parsed) return color ?? '';
+  const a = roundAlpha(alpha);
+  if (parsed.kind === 'hex') {
+    const base = `#${toHex2(parsed.r)}${toHex2(parsed.g)}${toHex2(parsed.b)}`;
+    return a >= 1 ? base : `${base}${toHex2(a * 255)}`;
+  }
+  return a >= 1
+    ? `rgb(${parsed.r}, ${parsed.g}, ${parsed.b})`
+    : `rgba(${parsed.r}, ${parsed.g}, ${parsed.b}, ${a})`;
+}
+
+/** 透明度的百分比文案，面板与提示共用一份格式。 */
+export function alphaPercent(alpha: number): string {
+  return `${Math.round(clamp01(alpha) * 100)}%`;
+}
+
+/**
+ * 判断一段文本是不是水杉能接受的颜色。用于文本框「边打边校验」：
+ * 半成品（如 `#ff`、`rgba(1,2,`）返回 false，不被写进配置去触发一屏校验错误。
+ * CSS 具名色与关键字（red、transparent 等）走字母分支放行。
+ */
+export function isColorText(text: string): boolean {
+  const value = text.trim();
+  if (value === '') return false;
+  if (parseColor(value)) return true;
+  return /^[a-z]+$/i.test(value);
+}

@@ -1,0 +1,8 @@
+# Cloudflare Pages 项目配置。
+# 用 Wrangler 直接部署时以这个文件为准；走 Git 集成时它的 pages_build_output_dir
+# 也会与后台的「构建输出目录」一致。
+# 本项目是纯静态前端，没有任何 Pages Functions，所以这里只有构建输出目录一项。
+
+name = "msime-skin-studio"
+pages_build_output_dir = "./dist"
+compatibility_date = "2026-10-16"

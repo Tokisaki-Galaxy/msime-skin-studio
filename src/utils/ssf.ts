@@ -331,8 +331,21 @@ export async function processSsfArchive(arrayBuffer: ArrayBuffer, fileName: stri
 
   const warnings: string[] = [];
 
-  const baseName = fileName.replace(/\.ssf$/i, '');
-  const title = general['skin_name'] || baseName;
+  // 搜狗皮肤制作工具会把 skin_name 预填成 new，作者不改就原样留在包里。这类占位名
+  // 等同于「没填名字」，继续往后退到文件名。文件名也可能不可用（new.ssf、browser 另存的
+  // xxx (1).ssf），所以最后一步才落到通用名字。
+  const baseName = fileName.replace(/\.(ssf|zip)$/i, '').replace(/\s*\(\d+\)$/, '').trim();
+  const PLACEHOLDER_NAMES = ['new', 'skin', 'default', 'untitled', '未命名'];
+  const isPlaceholder = (v: string) => PLACEHOLDER_NAMES.includes(v.trim().toLowerCase());
+  const rawTitle = (general['skin_name'] || '').trim();
+  const title =
+    (!isPlaceholder(rawTitle) && rawTitle) ||
+    (!isPlaceholder(baseName) && baseName) ||
+    `搜狗皮肤 ${general['skin_id'] || ''}`.trim() ||
+    '未命名搜狗皮肤';
+  if (rawTitle && isPlaceholder(rawTitle)) {
+    warnings.push(`skin.ini 里的皮肤名是制作工具留下的占位名「${rawTitle}」，已改用「${title}」，可在右侧属性里修改。`);
+  }
 
   // ---- 面板与九宫格 ----
   const panelRaw = cand['bg_cand'] || schemeH1['pic'] || '';

@@ -8,6 +8,13 @@
 name = "msime-skin-studio"
 compatibility_date = "2026-10-16"
 
+# Cloudflare 的构建流水线对非默认分支执行的是 `npx wrangler preview`，
+# 这条命令要求配置里有 previews 块，缺失会直接报错退出。
+# 本项目没有 vars、binding 之类需要给预览单独覆盖的东西，留空即可；
+# assets 与 compatibility_date 本就留在顶层，不必挪进来。
+# 参考 https://developers.cloudflare.com/workers/previews/configuration/
+[previews]
+
 [assets]
 directory = "./dist"
 # 本项目是单页应用，没有客户端路由，但保留 SPA 兜底：

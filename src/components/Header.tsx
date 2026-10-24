@@ -11,6 +11,8 @@ interface HeaderProps {
   layoutMode: 'horizontal' | 'vertical';
   onChangeLayoutMode: (mode: 'horizontal' | 'vertical') => void;
   skinName: string;
+  /** 当前配置与哪个模板分毫不差；已经改过则为 null，不显示高亮。 */
+  activeTemplateId?: string | null;
   isDarkMode: boolean;
   onToggleTheme: () => void;
 }
@@ -25,6 +27,7 @@ export const Header: React.FC<HeaderProps> = ({
   layoutMode,
   onChangeLayoutMode,
   skinName,
+  activeTemplateId = null,
   isDarkMode,
   onToggleTheme
 }) => {
@@ -86,16 +89,22 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="flex items-center gap-2 flex-wrap">
         <div className={groupCls}>
           <span className={groupLabelCls}>模版起手:</span>
-          {SKIN_TEMPLATES.map(tpl => (
-            <button
-              key={tpl.id}
-              onClick={() => onSelectTemplate(tpl)}
-              title={tpl.description}
-              className={`px-2.5 py-1 text-xs rounded transition ${idleBtnCls}`}
-            >
-              {tpl.name}
-            </button>
-          ))}
+          {SKIN_TEMPLATES.map(tpl => {
+            const isActive = tpl.id === activeTemplateId;
+            return (
+              <button
+                key={tpl.id}
+                onClick={() => onSelectTemplate(tpl)}
+                title={isActive ? `${tpl.description}（当前）` : tpl.description}
+                aria-pressed={isActive}
+                className={`px-2.5 py-1 text-xs rounded transition ${
+                  isActive ? 'bg-emerald-600 text-white font-medium' : idleBtnCls
+                }`}
+              >
+                {tpl.name}
+              </button>
+            );
+          })}
         </div>
 
         <div className={groupCls}>
@@ -151,10 +160,10 @@ export const Header: React.FC<HeaderProps> = ({
 
         <button
           onClick={() => skinDirInputRef.current?.click()}
-          title="选中一个皮肤目录（含 skin.toml 与图片），或直接选中导出的 ZIP"
+          title="选中一个导出的皮肤 ZIP，或裸 skin.toml"
           className={ghostBtnCls}
         >
-          导入皮肤 (.zip / 目录)
+          导入皮肤包 (.zip / .toml)
         </button>
         <input
           ref={skinDirInputRef}
@@ -165,10 +174,10 @@ export const Header: React.FC<HeaderProps> = ({
         />
         <button
           onClick={() => dirInputRef.current?.click()}
-          title="一次选中整个皮肤目录，连带图片一起读进来"
+          title="一次选中整个皮肤目录，连带 skin.toml 与图片一起读进来"
           className={ghostBtnCls}
         >
-          导入目录
+          导入整个目录
         </button>
         {/* 目录导入：webkitdirectory 让用户一次选中整个皮肤文件夹，连带图片一起读进来。 */}
         <input

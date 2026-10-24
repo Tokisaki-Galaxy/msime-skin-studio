@@ -185,6 +185,40 @@ export const App: React.FC = () => {
     });
   }, [config, assets]);
 
+  // 最近一次破坏性操作的撤销快照。素材被删后 object URL 已 revoke，撤销时先重新建一个。
+  // 只保留一步：够救手滑，又不会把整份历史留在内存里。
+  const undoRef = useRef<{
+    label: string;
+    config: SkinV2Config;
+    asset?: { path: string; asset: SkinAsset; file?: File };
+  } | null>(null);
+  const [undoLabel, setUndoLabel] = useState<string | null>(null);
+
+  const pushUndo = (
+    label: string,
+    configSnapshot: SkinV2Config,
+    asset?: { path: string; asset: SkinAsset; file?: File }
+  ) => {
+    undoRef.current = { label, config: configSnapshot, asset };
+    setUndoLabel(label);
+  };
+
+  const handleUndo = () => {
+    const snapshot = undoRef.current;
+    if (!snapshot) return;
+    setConfig(snapshot.config);
+    if (snapshot.asset) {
+      const { path, asset, file } = snapshot.asset;
+      const reloaded = file
+        ? { ...asset, blobUrl: URL.createObjectURL(file) }
+        : asset;
+      if (file) ownedUrlsRef.current.add(reloaded.blobUrl);
+      setAssets(prev => new Map(prev).set(path, reloaded));
+    }
+    undoRef.current = null;
+    setUndoLabel(null);
+  };
+
   // 自己 createObjectURL 出来的地址要记着，替换同名素材、切模板、组件卸载三处都要释放。
   // data URL（模板内置图、SSF 解出来的图）不是 object URL，不能 revoke。
   const ownedUrlsRef = useRef<Set<string>>(new Set());
@@ -420,6 +454,9 @@ export const App: React.FC = () => {
     if ((cw.decorations ?? []).some(d => d.image === pathKey)) refs.push('自由挂件');
     if (refs.length > 0 && !window.confirm(`${pathKey} 正被${refs.join('、')}使用，删除后会一并清掉，继续吗？`)) return;
 
+    const removed = assets.get(pathKey);
+    if (removed) pushUndo(`删除素材 ${pathKey.replace('assets/', '')}`, config, { path: pathKey, asset: removed, file: removed.file });
+
     setAssets(prev => {
       const next = new Map(prev);
       const asset = next.get(pathKey);
@@ -445,6 +482,17 @@ export const App: React.FC = () => {
     });
   };
 
+  /** 取消槽位但保留素材。快照在 setConfig 之外取，更新函数保持纯函数。 */
+  const handleClearPanel = () => {
+    pushUndo('清除九宫格面板', config);
+    setConfig(prev => ({ ...prev, candidate_window: { ...prev.candidate_window, border_image: undefined } }));
+  };
+
+  const handleClearBackground = () => {
+    pushUndo('清除卡片背景', config);
+    setConfig(prev => ({ ...prev, candidate_window: { ...prev.candidate_window, background: undefined } }));
+  };
+
   const handleSaveSlice = (slice: number[], width: number[], outer: Insets) => {
     setConfig(prev => ({
       ...prev,
@@ -462,6 +510,12 @@ export const App: React.FC = () => {
     setSliceModalOpen(false);
   };
 
+  // 模板高亮只在配置与模板完全一致时出现，改过任意字段就撤掉，避免误导。
+  const activeTemplateId = useMemo(
+    () => SKIN_TEMPLATES.find(tpl => JSON.stringify(tpl.config) === JSON.stringify(config))?.id ?? null,
+    [config]
+  );
+
   const panelPath = config.candidate_window.border_image?.source;
   const panelAsset = panelPath ? assets.get(panelPath) : undefined;
 
@@ -469,6 +523,7 @@ export const App: React.FC = () => {
     <div className={`flex flex-col h-screen w-screen overflow-hidden font-sans ${isDarkMode ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-800'}`}>
       <Header
         skinName={config.meta.name}
+        activeTemplateId={activeTemplateId}
         layoutMode={layoutMode}
         onChangeLayoutMode={setLayoutMode}
         onSelectTemplate={handleSelectTemplate}
@@ -494,6 +549,24 @@ export const App: React.FC = () => {
         </div>
       )}
 
+      {undoLabel && (
+        <div
+          className={`px-4 py-1.5 text-xs flex items-center justify-between gap-3 border-b ${
+            isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-sky-50 border-sky-200 text-sky-900'
+          }`}
+        >
+          <span>已{undoLabel}</span>
+          <span className="flex items-center gap-3 shrink-0">
+            <button onClick={handleUndo} className="font-medium underline hover:text-sky-600">
+              撤销
+            </button>
+            <button onClick={() => { undoRef.current = null; setUndoLabel(null); }} className="underline opacity-70 hover:opacity-100">
+              关闭
+            </button>
+          </span>
+        </div>
+      )}
+
       <div ref={bodyRef} className={`flex-1 flex overflow-hidden ${draggingSide ? 'select-none' : ''}`}>
         <div style={{ width: leftWidth }} className="shrink-0 flex h-full min-w-0">
           <AssetManager
@@ -503,13 +576,21 @@ export const App: React.FC = () => {
             onRemoveAsset={handleRemoveAsset}
             onSetPanelImage={handleSetPanelImage}
             onSetBackgroundImage={handleSetBackgroundImage}
+            onClearPanel={handleClearPanel}
+            onClearBackground={handleClearBackground}
             onAddDecorationFromAsset={handleAddDecorationFromAsset}
             onOpenSliceModal={() => setSliceModalOpen(true)}
             isDarkMode={isDarkMode}
           />
         </div>
 
-        <Splitter isDarkMode={isDarkMode} dragging={draggingSide === 'left'} onMouseDown={startDrag('left')} />
+        <Splitter
+          isDarkMode={isDarkMode}
+          dragging={draggingSide === 'left'}
+          label="素材库与预览之间的分隔条"
+          onMouseDown={startDrag('left')}
+          onNudge={delta => setLeftWidth(prev => clampSideWidths(prev + delta, rightWidth, bodyRef.current?.clientWidth ?? window.innerWidth).left)}
+        />
 
         <main className={`flex-1 flex flex-col relative overflow-hidden min-w-0 ${isDarkMode ? 'bg-slate-950' : 'bg-slate-100'}`}>
           <div className={`h-10 border-b px-4 flex items-center justify-between text-xs select-none ${isDarkMode ? 'border-slate-800 bg-slate-900/60 text-slate-400' : 'border-slate-200 bg-white text-slate-600'}`}>
@@ -634,7 +715,13 @@ export const App: React.FC = () => {
           </div>
         </main>
 
-        <Splitter isDarkMode={isDarkMode} dragging={draggingSide === 'right'} onMouseDown={startDrag('right')} />
+        <Splitter
+          isDarkMode={isDarkMode}
+          dragging={draggingSide === 'right'}
+          label="预览与属性面板之间的分隔条"
+          onMouseDown={startDrag('right')}
+          onNudge={delta => setRightWidth(prev => clampSideWidths(leftWidth, prev - delta, bodyRef.current?.clientWidth ?? window.innerWidth).right)}
+        />
 
         <div style={{ width: rightWidth }} className="shrink-0 flex h-full min-w-0">
           <ConfigPanel
@@ -664,16 +751,31 @@ export const App: React.FC = () => {
   );
 };
 
-/** 三栏之间的拖拽条。宽度固定 5px，命中区域够大又不抢视觉。 */
+/** 三栏之间的拖拽条。宽度固定 5px，命中区域够大又不抢视觉；聚焦后可用左右方向键微调。 */
 const Splitter: React.FC<{
   isDarkMode: boolean;
   dragging: boolean;
+  label: string;
   onMouseDown: (e: React.MouseEvent) => void;
-}> = ({ isDarkMode, dragging, onMouseDown }) => (
+  onNudge: (delta: number) => void;
+}> = ({ isDarkMode, dragging, label, onMouseDown, onNudge }) => (
   <div
+    role="separator"
+    aria-orientation="vertical"
+    aria-label={label}
+    tabIndex={0}
+    title="拖动调整栏宽，聚焦后用方向键微调"
     onMouseDown={onMouseDown}
-    title="拖动调整栏宽"
-    className={`w-[5px] shrink-0 cursor-col-resize transition-colors ${
+    onKeyDown={e => {
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        onNudge(-16);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        onNudge(16);
+      }
+    }}
+    className={`w-[5px] shrink-0 cursor-col-resize transition-colors outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
       dragging
         ? 'bg-emerald-500'
         : isDarkMode

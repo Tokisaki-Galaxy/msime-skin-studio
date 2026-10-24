@@ -48,7 +48,9 @@ export const InsetsEditor: React.FC<InsetsEditorProps> = ({
 
   const setSide = (side: (typeof SIDES)[number], raw: number) => {
     const clamped = Math.min(limits[side], Math.max(0, raw));
-    if (lock && side === 'top') {
+    if (lock) {
+      // 联动时改任意一边都把四边拉齐，但不在这里抹平：用户刚调好的四边不该因为点了
+      // 「四边联动」就只剩左边的值。
       onChange({ top: clamped, right: clamped, bottom: clamped, left: clamped });
       return;
     }
@@ -61,15 +63,14 @@ export const InsetsEditor: React.FC<InsetsEditorProps> = ({
         <div className="flex items-center justify-end">
           <button
             type="button"
-            onClick={() => {
-              const next = !lock;
-              setLock(next);
-              if (next) {
-                // 上锁时以左边为准拉齐四边，避免留下一个「已锁但值不同」的错觉。
-                onChange({ top: value.left, right: value.left, bottom: value.left, left: value.left });
-              }
-            }}
-            title={lock ? '四边联动中，点开分别设置' : '四边分别设置中，点开关闭联动'}
+            onClick={() => setLock(prev => !prev)}
+            title={
+              lock
+                ? '四边联动中，改任意一边其余三边跟随'
+                : allEqual
+                ? '四边分别设置中，点开联动（首次修改时四边一起变）'
+                : '四边分别设置中，点开联动（下次修改时会以那一边为准拉齐四边）'
+            }
             className={cn(
               'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition',
               lock
@@ -98,8 +99,9 @@ export const InsetsEditor: React.FC<InsetsEditorProps> = ({
                 const parsed = Number(e.target.value);
                 if (Number.isFinite(parsed)) setSide(side, parsed);
               }}
+              // 清空后不论去向哪里都回填当前值，否则空框会一直留在表单里。
               onBlur={e => {
-                if (e.target.value.trim() === '') setSide(side, value[side]);
+                if (e.target.value.trim() === '') e.target.value = String(value[side]);
               }}
               className={cn(
                 'w-full rounded-md border px-1 py-1 text-center text-[11px] font-mono outline-none transition focus:border-emerald-500',

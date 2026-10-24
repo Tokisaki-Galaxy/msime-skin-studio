@@ -8,6 +8,9 @@ interface AssetManagerProps {
   onRemoveAsset: (path: string) => void;
   onSetPanelImage: (path: string) => void;
   onSetBackgroundImage: (path: string) => void;
+  /** 取消九宫格面板与卡片背景，素材本身保留在库里。 */
+  onClearPanel: () => void;
+  onClearBackground: () => void;
   onAddDecorationFromAsset: (path: string) => void;
   onOpenSliceModal: () => void;
   isDarkMode?: boolean;
@@ -20,6 +23,8 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
   onRemoveAsset,
   onSetPanelImage,
   onSetBackgroundImage,
+  onClearPanel,
+  onClearBackground,
   onAddDecorationFromAsset,
   onOpenSliceModal,
   isDarkMode = false
@@ -41,11 +46,18 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
     setIsDragOver(false);
     const files = e.dataTransfer.files;
     if (!files) return;
+    const skipped: string[] = [];
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       if (file.type.startsWith('image/') || /\.(png|jpe?g|bmp|webp|gif)$/i.test(file.name)) {
         onAddAsset(`assets/${file.name}`, file);
+      } else {
+        // 拖进来的混有目录或非图片时，静默跳过会让人以为拖拽坏了，这里攒起来说一次。
+        skipped.push(file.name || '(未命名)');
       }
+    }
+    if (skipped.length > 0) {
+      alert(`以下文件不是图片，已跳过：\n${skipped.map(n => '· ' + n).join('\n')}`);
     }
   };
 
@@ -87,16 +99,28 @@ export const AssetManager: React.FC<AssetManagerProps> = ({
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium">九宫格面板 border_image</span>
             {panel && (
-              <button onClick={onOpenSliceModal} className="text-[11px] text-emerald-500 hover:text-emerald-400">
-                标定切片
-              </button>
+              <span className="flex items-center gap-2">
+                <button onClick={onOpenSliceModal} className="text-[11px] text-emerald-500 hover:text-emerald-400">
+                  标定切片
+                </button>
+                <button onClick={onClearPanel} title="取消九宫格面板" className={`text-[11px] ${labelCls} hover:text-rose-500`}>
+                  清除
+                </button>
+              </span>
             )}
           </div>
           <div className={`text-[11px] truncate font-mono mt-1 ${labelCls}`}>{panel || '未设置'}</div>
         </div>
 
         <div className={slotCls}>
-          <span className="text-xs font-medium">卡片背景 background</span>
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium">卡片背景 background</span>
+            {background && (
+              <button onClick={onClearBackground} title="取消卡片背景图" className={`text-[11px] ${labelCls} hover:text-rose-500`}>
+                清除
+              </button>
+            )}
+          </div>
           <div className={`text-[11px] truncate font-mono mt-1 ${labelCls}`}>{background || '未设置'}</div>
         </div>
 

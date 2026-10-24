@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { DecorationAnchor, SkinAsset, SkinV2Config, ThemeName, LayoutMode } from '../../types/skin';
 import { baseSkinCss, SHARED_CANDIDATE_CSS, HORIZONTAL_PAGE_CSS } from '../../skins';
 import { buildHostVars, buildSkinOverrideCss, outerInsetsOf } from '../../utils/skinCss';
-import { InspectTarget, subscribeInspectTarget } from '../../utils/inspect';
+import { InspectTarget, setInspectTarget, subscribeInspectTarget } from '../../utils/inspect';
 
 interface CandidatePreviewProps {
   config: SkinV2Config;
@@ -227,6 +227,17 @@ ${buildBridgeScript({ top: padTop, right: padRight, bottom: padBottom, left: pad
   const [inspect, setInspect] = useState<InspectTarget>(null);
   useEffect(() => subscribeInspectTarget(setInspect), []);
 
+  // 预览自身滚动时高亮会错位，直接收起。只监听这个容器，不监听全局 scroll：
+  // 后者会把用户滚动右侧面板找字段的动作也当成「注意力转移」，反而清掉刚点亮的高亮。
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !inspect) return;
+    const clear = () => setInspectTarget(null);
+    el.addEventListener('scroll', clear, { passive: true });
+    return () => el.removeEventListener('scroll', clear);
+  }, [inspect]);
+
   // 卡片相对预览左上角的位置与尺寸，用来画「文字内边距」高亮框。由 iframe 内脚本量好报回来。
   const [contentBox, setContentBox] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
 
@@ -353,6 +364,7 @@ ${buildBridgeScript({ top: padTop, right: padRight, bottom: padBottom, left: pad
 
   return (
     <div
+      ref={scrollRef}
       className="relative select-none"
       style={{ width: '100%', overflow: 'auto' }}
       onClick={() => onSelectDecoration?.(null)}
@@ -382,12 +394,11 @@ ${buildBridgeScript({ top: padTop, right: padRight, bottom: padBottom, left: pad
           </div>
         )}
 
-        {/* 字段高亮层：与上面同坐标系，但完全不吃事件。 */}
+        {/* 字段高亮层。contentBox 是 iframe 内相对文档左上角的绝对坐标，所以这一层
+            不能再加 padding（那会二次偏移），直接用 inset-0 铺满 iframe 区域对齐。
+            1px 是本层与 iframe 边框的差，扣掉才能贴住内容边缘。 */}
         {inspect && (
-          <div
-            className="absolute inset-0 pointer-events-none z-20"
-            style={{ padding: `${padTop}px ${padRight}px ${padBottom}px ${padLeft}px` }}
-          >
+          <div className="absolute inset-0 pointer-events-none z-20" style={{ padding: 1 }}>
             <div className="relative h-full">
               {inspect === 'content' && contentBox && (
                 <div
@@ -406,8 +417,13 @@ ${buildBridgeScript({ top: padTop, right: padRight, bottom: padBottom, left: pad
                   </span>
                 </div>
               )}
-              {inspect === 'panel' && (
-                <div className="absolute inset-0 rounded border-2 border-emerald-400 bg-emerald-400/10">
+              {/* 九宫格面板画的是卡片本身，不是外围留白：两者只在 outer_insets 全 0 时才重合，
+                  用 inset-0 会在带立绘留白的皮肤上整体框偏。 */}
+              {inspect === 'panel' && contentBox && (
+                <div
+                  className="absolute rounded border-2 border-emerald-400 bg-emerald-400/10"
+                  style={{ top: contentBox.top, left: contentBox.left, width: contentBox.width, height: contentBox.height }}
+                >
                   <span className="absolute left-1 top-1 whitespace-nowrap rounded bg-emerald-600 px-1.5 text-[10px] text-white">
                     九宫格面板
                   </span>
@@ -455,15 +471,21 @@ const buildBridgeScript = (pad: { top: number; right: number; bottom: number; le
     // .container 才是按内容撑开的元素，.stage 与 containerParent 都会被视口拉到满宽。
     var w = Math.ceil(card.scrollWidth) + PAD_LEFT + PAD_RIGHT + 2;
     var h = Math.max(body.scrollHeight, Math.ceil(card.getBoundingClientRect().height) + PAD_TOP + PAD_BOTTOM) + 2;
-    // 卡片相对 body 左上角的偏移，供宿主在覆盖层上对齐高亮框。
+    // 卡片相对文档左上角的坐标，供宿主在覆盖层上对齐高亮框。iframe 内不会滚动，
+    // scroll 项通常是 0，留着是为了视口滚动时仍然取到绝对坐标。
     var cb = card.getBoundingClientRect();
     var box = {
-      top: Math.round(cb.top + window.scrollX),
-      left: Math.round(cb.left + window.scrollY),
+      top: Math.round(cb.top + window.scrollY),
+      left: Math.round(cb.left + window.scrollX),
       width: Math.round(cb.width),
       height: Math.round(cb.height)
     };
-    if (w === lastW && h === lastH && box.top === lastBox.top && box.left === lastBox.left && box.width === lastBox.width) return;
+    // 高度必须一起去重：宽度被 max-content 锁住时，只有行数变化会让卡片长高。
+    if (
+      w === lastW && h === lastH &&
+      box.top === lastBox.top && box.left === lastBox.left &&
+      box.width === lastBox.width && box.height === lastBox.height
+    ) return;
     lastW = w; lastH = h; lastBox = box;
     parent.postMessage({ type: 'msime-preview-size', width: w, height: h, box: box }, '*');
   }

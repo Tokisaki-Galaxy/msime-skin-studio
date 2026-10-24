@@ -32,7 +32,17 @@ describe('搜狗皮肤导入后的显示名', () => {
 
   it('占位名判定不区分大小写与首尾空格', () => {
     expect(resolveSkinTitle('  NEW  ', '航海.ssf').title).toBe('航海');
-    expect(resolveSkinTitle('Skin', '航海.ssf').title).toBe('航海');
+    expect(resolveSkinTitle('Untitled', '航海.ssf').title).toBe('航海');
+  });
+
+  it('default / skin 这类可能是真名的值不当占位', () => {
+    expect(resolveSkinTitle('Skin', '航海.ssf').title).toBe('Skin');
+    expect(resolveSkinTitle('Default', '航海.ssf').title).toBe('Default');
+  });
+
+  it('浏览器另存的 (1) 与双后缀组合也能剥干净', () => {
+    expect(resolveSkinTitle('', '航海.ssf (1)').title).toBe('航海');
+    expect(resolveSkinTitle('', '航海 (1).ssf').title).toBe('航海');
   });
 
   it('正常的皮肤名不会被当成占位', () => {

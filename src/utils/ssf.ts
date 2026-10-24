@@ -249,19 +249,29 @@ function anchorFromAlign(value?: string): DecorationAnchor {
 }
 
 /** msime 要求 id 只含小写字母数字与 . _ -，且以字母数字开头，长度 ≤ 64。 */
-/** 搜狗皮肤制作工具预填、作者常常忘了改的占位名。这些名字等于「没填」。 */
-const PLACEHOLDER_SKIN_NAMES = ['new', 'skin', 'default', 'untitled', '未命名'];
+/**
+ * 搜狗皮肤制作工具预填、作者常常忘了改的占位名。这些名字等于「没填」。
+ * 只收明显不是真名的值：default / skin 都可能是有意的皮肤名，判成占位会误改名。
+ */
+const PLACEHOLDER_SKIN_NAMES = ['new', 'untitled', '未命名'];
 
 function isPlaceholderName(value: string): boolean {
   return PLACEHOLDER_SKIN_NAMES.includes(value.trim().toLowerCase());
 }
 
-/** 文件名去掉扩展名与浏览器另存留下的 "(1)" 尾缀。xxx.ssf.zip 这类双后缀也剥干净。 */
+/**
+ * 文件名去掉扩展名与浏览器另存留下的 "(1)" 尾缀。
+ * 要反复剥：「航海 (1).ssf」「航海.ssf (1)」「航海.ssf.zip」的顺序各不相同，
+ * 只跑一轮会留下 .zip 或 (1) 的残渣。
+ */
 export function stripSkinFileName(fileName: string): string {
-  return fileName
-    .replace(/(\.(ssf|zip))+$/i, '')
-    .replace(/\s*\(\d+\)$/, '')
-    .trim();
+  let out = fileName.trim();
+  for (let i = 0; i < 5; i++) {
+    const before = out;
+    out = out.replace(/\.(ssf|zip)$/i, '').replace(/\s*\(\d+\)$/, '').trim();
+    if (out === before) break;
+  }
+  return out;
 }
 
 /**
@@ -296,6 +306,7 @@ export function safeSkinId(source: string, skinId?: string): string {
   // 名字全是中文时，用搜狗的 skin_id，再不行就用名字的哈希，保证不同皮肤不会撞 id。
   const numeric = (skinId || '').replace(/[^0-9]/g, '');
   if (numeric) return `sogou_${numeric}`.slice(0, 64);
+  if (!source) return 'sogou_skin_untitled';
   let hash = 0;
   for (let i = 0; i < source.length; i++) hash = (hash * 31 + source.charCodeAt(i)) >>> 0;
   return `sogou_skin_${hash.toString(16)}`;

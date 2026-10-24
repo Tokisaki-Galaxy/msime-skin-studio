@@ -11,7 +11,7 @@ import { SKIN_TEMPLATES, SkinTemplate } from './constants/templates';
 import { processSsfArchive } from './utils/ssf';
 import { exportSkinPackage, downloadBlob } from './utils/exporter';
 import { validateSkinConfig } from './utils/toml';
-import { loadSession, saveSession } from './utils/session';
+import { clearSession, loadSession, saveSession } from './utils/session';
 import { importSkinFiles, importSkinToml, importSkinZip, referencedImages, ImportedSkin } from './utils/importer';
 
 /** 给导出结果条用：175.6 KB 这种写法比一串字节数好懂。 */
@@ -194,8 +194,20 @@ export const App: React.FC = () => {
   // 下次进来会被判成「有未导出的编辑」，弹出误导性的恢复提示。
   useEffect(() => {
     if (!hydrated) return;
-    const pristine = assets.size === 0 && JSON.stringify(config) === JSON.stringify(SKIN_TEMPLATES[0].config);
-    if (pristine) return;
+    // 只看 config 与模板是否一致还不够：只切了横竖排或预览主题的用户，改动同样值得留。
+    // 这里把「默认模板 + 默认预览设置」整体当作 pristine，其余一律落盘。
+    const pristine =
+      assets.size === 0 &&
+      JSON.stringify(config) === JSON.stringify(SKIN_TEMPLATES[0].config) &&
+      layoutMode === 'horizontal' &&
+      previewTheme === 'dark' &&
+      !origin.startsWith('搜狗皮肤') &&
+      !origin.startsWith('模板「');
+    if (pristine) {
+      // 改回默认模板后旧存档要清掉，否则下次进来还会读到它、继续弹「已恢复」。
+      clearSession();
+      return;
+    }
     saveSession({
       config,
       layoutMode,
@@ -211,6 +223,16 @@ export const App: React.FC = () => {
 
   // 实时校验：导出按钮据此禁用，面板顶部列出问题，不再等到点导出才 alert。
   const validationIssues = useMemo(() => validateSkinConfig(config).map(i => `${i.field}：${i.message}`), [config]);
+  // 模板内置的占位图是 SVG data URL。导出时会被原样写成 .png，水杉用 WIC 解码打不开，
+  // 用户却会拿到一个「导出成功」的坏皮肤。这里当成阻断项报出来。
+  const placeholderAssets = useMemo(() => {
+    const refs = referencedImages(config);
+    return refs.filter(ref => {
+      const alt = ref.startsWith('assets/') ? ref.slice('assets/'.length) : `assets/${ref}`;
+      const asset = assets.get(ref) ?? assets.get(alt);
+      return !!asset && asset.blobUrl.startsWith('data:image/svg');
+    });
+  }, [config, assets]);
   const assetsMissing = useMemo(() => {
     const refs = referencedImages(config);
     return refs.filter(ref => {
@@ -314,6 +336,9 @@ export const App: React.FC = () => {
 
   const handleSelectTemplate = (tpl: SkinTemplate) => {
     if (!confirmDiscard(`模板「${tpl.name}」`)) return;
+    // 整份配置被替换后，上一套皮肤留下的撤销快照就失效了。不清掉的话点「撤销」
+    // 会把旧配置盖回新皮肤上，预览变成两套皮肤的拼接体。
+    discardUndo();
     loadTemplate(tpl);
     setOrigin(`模板「${tpl.name}」`);
     setRestoredNotice(null);
@@ -358,6 +383,7 @@ export const App: React.FC = () => {
         releaseAssets(prev);
         return next;
       });
+      discardUndo();
       setConfig(result.skinConfig);
       setSelectedDecorationIndex(null);
       setOrigin(`搜狗皮肤 ${file.name}`);
@@ -410,6 +436,7 @@ export const App: React.FC = () => {
       return next;
     });
     // 用导入的配置补全模板默认值，避免缺字段让渲染报错。
+    discardUndo();
     setConfig({ ...SKIN_TEMPLATES[0].config, ...result.config, meta: { ...SKIN_TEMPLATES[0].config.meta, ...result.config.meta } } as SkinV2Config);
     setSelectedDecorationIndex(null);
     setOrigin(result.sourceLabel);
@@ -426,14 +453,20 @@ export const App: React.FC = () => {
   const handleExport = async () => {
     if (exporting) return;
     setExporting(true);
+    // 上一次的成功横幅先收掉：失败时留着它，页面上会同时出现「已导出」和一条报错。
+    setExportResult(null);
     try {
       const blob = await exportSkinPackage(config, assets);
-      const safeName = (config.meta.id || 'my_skin').replace(/[^a-z0-9._-]/gi, '_');
-      const filename = `${safeName}.zip`;
+      // ZIP 里的根目录名就是 meta.id，文件名也用它，两者必须一致，否则用户按横幅
+      // 去包里找「xxx/」会找不到。
+      const skinId = config.meta.id || 'my_skin';
+      const filename = `${skinId}.zip`;
       downloadBlob(blob, filename);
       // 下载是浏览器的行为，页面原本毫无反应，用户连点三次也不知道成没成。
       // 这里给出文件名、大小与「接下来怎么装」，闭环最后一环。
-      setExportResult({ filename, size: blob.size, skinId: safeName });
+      setExportResult({ filename, size: blob.size, skinId });
+      // 导出成功意味着这一轮任务走完了，先前的导入/恢复提示可以让位，避免页头叠两三条横幅。
+      setRestoredNotice(null);
     } catch (err) {
       alert(`导出皮肤失败: ${(err as Error).message || err}`);
     } finally {
@@ -628,7 +661,15 @@ export const App: React.FC = () => {
     setSampleTranslations(Array.from({ length: n }, (_, i) => (i === 0 ? 'metasequoia' : '')));
     setSamplePos(Array.from({ length: n }, (_, i) => (i === 0 ? 'n.' : '')));
     setSelectedIndex(0);
+    // 复位时把自检临时借走的主题还回去。
+    if (kind === 'reset' && themeBeforeCheck.current !== null) {
+      setPreviewTheme(themeBeforeCheck.current);
+      themeBeforeCheck.current = null;
+    }
   };
+
+  // 进自检前的主题选择，仅用于「复位」还原。
+  const themeBeforeCheck = useRef<ThemeName | null>(null);
 
   const checkBtnCls = `shrink-0 px-2 py-0.5 rounded border transition ${
     isDarkMode
@@ -651,7 +692,7 @@ export const App: React.FC = () => {
         onImportSkin={handleImportSkin}
         onImportSkinFiles={handleImportSkinFiles}
         onExport={handleExport}
-        exportDisabled={validationIssues.length > 0 || assetsMissing.length > 0}
+        exportDisabled={validationIssues.length > 0 || assetsMissing.length > 0 || placeholderAssets.length > 0}
         exporting={exporting}
         origin={origin}
         isDarkMode={isDarkMode}
@@ -810,9 +851,14 @@ export const App: React.FC = () => {
             >
               单候选
             </button>
+            {/* 自检只切临时视图，不改写会话里记住的主题偏好：进自检前的选择存在 ref 里，
+                点「复位」时还原。否则用户点一下自检，下次打开页面主题就悄悄变了。 */}
             <button
-              onClick={() => setPreviewTheme(previewTheme === 'dark' ? 'light' : 'dark')}
-              title="切换深浅色：检查两边配色是否都可读"
+              onClick={() => {
+                if (themeBeforeCheck.current === null) themeBeforeCheck.current = previewTheme;
+                setPreviewTheme(previewTheme === 'dark' ? 'light' : 'dark');
+              }}
+              title="临时切到另一套配色，检查两边是否都可读；点「复位」还原"
               className={checkBtnCls}
             >
               切换深浅色
@@ -856,12 +902,25 @@ export const App: React.FC = () => {
             />
           </div>
 
-          {(validationIssues.length > 0 || assetsMissing.length > 0) && (
+          {(validationIssues.length > 0 || assetsMissing.length > 0 || placeholderAssets.length > 0) && (
             <div
               className={`max-h-32 overflow-y-auto border-t px-4 py-2 text-[11px] ${
                 isDarkMode ? 'border-slate-800 bg-rose-950/40 text-rose-200' : 'border-rose-200 bg-rose-50 text-rose-800'
               }`}
             >
+              {placeholderAssets.length > 0 && (
+                <>
+                  <div className="font-medium mb-0.5">还在用模板占位图（{placeholderAssets.length}）</div>
+                  <p className="mb-1 opacity-90">
+                    这些是模板内置的矢量占位图，导出后会写成 .png，水杉打不开。请换成真正的 PNG 再导出。
+                  </p>
+                  <ul className="list-disc pl-4 space-y-0.5">
+                    {placeholderAssets.map((p, i) => (
+                      <li key={i}>{p}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
               {validationIssues.length > 0 && (
                 <>
                   <div className="font-medium mb-0.5">导出会被水杉拒绝（{validationIssues.length}）</div>

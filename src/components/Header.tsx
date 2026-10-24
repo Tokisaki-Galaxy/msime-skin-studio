@@ -93,7 +93,9 @@ export const Header: React.FC<HeaderProps> = ({
             </h1>
             {/* 皮肤名与来源要能被一眼看到：先前只是 11px 灰字，新手确认不了自己在编辑什么。 */}
             <div className="flex items-center gap-1.5 text-[11px] mt-0.5">
-              <span className={`font-medium ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}>{skinName || '未命名皮肤'}</span>
+              <span className={`font-medium truncate max-w-[220px] ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`} title={skinName}>
+                {skinName || '未命名皮肤'}
+              </span>
               {origin && (
                 <span className={`truncate max-w-[180px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} title={origin}>
                   来自 {origin}

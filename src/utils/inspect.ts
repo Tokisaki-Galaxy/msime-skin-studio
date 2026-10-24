@@ -25,17 +25,22 @@ export function getInspectTarget(): InspectTarget {
   return current;
 }
 
-/** 预览侧订阅。返回取消订阅函数。 */
+/**
+ * 预览侧订阅。订阅时立刻回放一次当前值，避免热更新或二次挂载后组件以为「没有高亮」，
+ * 而模块里其实还留着一个未清掉的目标。
+ */
 export function subscribeInspectTarget(listener: Listener): () => void {
   listeners.add(listener);
+  listener(current);
   return () => {
     listeners.delete(listener);
   };
 }
 
-// 兜底：面板被折叠或字段被删除时 mouseleave 不一定触发，高亮可能卡在预览上。
-// 滚动是「注意力已经转移」的明确信号，清掉即可。不监听 mousedown：那会让
-// 用户在悬停状态下点数字框输入时高亮闪掉。
-if (typeof window !== 'undefined') {
-  window.addEventListener('scroll', () => setInspectTarget(null), true);
+// 模块级单例在热更新时会残留旧状态，重载前清干净。
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    listeners.clear();
+    current = null;
+  });
 }

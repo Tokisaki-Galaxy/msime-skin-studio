@@ -14,10 +14,20 @@ describe('参数与预览的联动通道', () => {
     setInspectTarget(null);
   });
 
-  it('重复设置同一个值不会再通知，避免无谓重渲染', () => {
+  it('订阅时立刻回放当前值，避免热更新后组件以为没有高亮', () => {
+    setInspectTarget('panel');
     const spy = vi.fn();
     const off = subscribeInspectTarget(spy);
+    expect(spy).toHaveBeenCalledWith('panel');
+    off();
     setInspectTarget(null);
+  });
+
+  it('重复设置同一个值不会再通知，避免无谓重渲染', () => {
+    setInspectTarget(null);
+    const spy = vi.fn();
+    const off = subscribeInspectTarget(spy);
+    spy.mockClear();
     setInspectTarget('outer');
     setInspectTarget('outer');
     expect(spy).toHaveBeenCalledTimes(1);
@@ -28,6 +38,7 @@ describe('参数与预览的联动通道', () => {
   it('取消订阅后不再收到通知', () => {
     const spy = vi.fn();
     const off = subscribeInspectTarget(spy);
+    spy.mockClear();
     off();
     setInspectTarget('panel');
     expect(spy).not.toHaveBeenCalled();

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Header } from './components/Header';
-import { CandidatePreview, PreviewBackend } from './components/CandidatePreview';
+import { CandidatePreview } from './components/CandidatePreview';
 import { AssetManager } from './components/AssetManager';
 import { ConfigPanel } from './components/ConfigPanel';
 import { SliceModal } from './components/SliceModal';
@@ -53,7 +53,6 @@ export const App: React.FC = () => {
 
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('horizontal');
   const [previewTheme, setPreviewTheme] = useState<ThemeName>('dark');
-  const [previewBackend, setPreviewBackend] = useState<PreviewBackend>('webview2');
   const [samplePinyin, setSamplePinyin] = useState("shui'shan'shu'ru'fa");
   const [sampleCandidates, setSampleCandidates] = useState(['水杉输入法', '水杉', '水扇', '税收', '随身']);
   const [sampleTranslations, setSampleTranslations] = useState<string[]>(['metasequoia', '', '', '', '']);
@@ -120,7 +119,9 @@ export const App: React.FC = () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
-  }, [draggingSide, leftWidth, rightWidth]);
+    // 只依赖 draggingSide：左右宽度走 widthsRef 读最新值，否则每帧 setWidth 都会重装监听。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draggingSide]);
 
   const startDrag = (side: 'left' | 'right') => (e: React.MouseEvent) => {
     e.preventDefault();
@@ -144,7 +145,6 @@ export const App: React.FC = () => {
       setConfig(s.config);
       setLayoutMode(s.layoutMode);
       setPreviewTheme(s.previewTheme);
-      setPreviewBackend(s.previewBackend);
       setSamplePinyin(s.samplePinyin);
       setSampleCandidates(s.sampleCandidates.length ? s.sampleCandidates : ['水杉输入法']);
       setSampleTranslations(s.sampleTranslations);
@@ -169,14 +169,13 @@ export const App: React.FC = () => {
       config,
       layoutMode,
       previewTheme,
-      previewBackend,
       samplePinyin,
       sampleCandidates,
       sampleTranslations,
       samplePos,
       selectedIndex
     });
-  }, [config, layoutMode, previewTheme, previewBackend, samplePinyin, sampleCandidates, sampleTranslations, samplePos, selectedIndex]);
+  }, [config, layoutMode, previewTheme, samplePinyin, sampleCandidates, sampleTranslations, samplePos, selectedIndex]);
 
   // 实时校验：导出按钮据此禁用，面板顶部列出问题，不再等到点导出才 alert。
   const validationIssues = useMemo(() => validateSkinConfig(config).map(i => `${i.field}：${i.message}`), [config]);
@@ -187,6 +186,57 @@ export const App: React.FC = () => {
       return !assets.has(ref) && !assets.has(alt);
     });
   }, [config, assets]);
+
+  // 最近一次破坏性操作的撤销快照。素材被删后 object URL 已 revoke，撤销时先重新建一个。
+  // 只保留一步：够救手滑，又不会把整份历史留在内存里。
+  // createdUrl 记录撤销时新开出来的 object URL，下一次覆盖快照前要回收。
+  const undoRef = useRef<{
+    label: string;
+    config: SkinV2Config;
+    asset?: { path: string; asset: SkinAsset; file?: File };
+    createdUrl?: string;
+  } | null>(null);
+  const [undoLabel, setUndoLabel] = useState<string | null>(null);
+
+  /** 丢弃撤销快照，顺手撤销时新建的 object URL，避免攒下一堆没人引用的地址。 */
+  const discardUndo = () => {
+    const snapshot = undoRef.current;
+    if (snapshot?.createdUrl && ownedUrlsRef.current.has(snapshot.createdUrl)) {
+      URL.revokeObjectURL(snapshot.createdUrl);
+      ownedUrlsRef.current.delete(snapshot.createdUrl);
+    }
+    undoRef.current = null;
+    setUndoLabel(null);
+  };
+
+  const pushUndo = (
+    label: string,
+    configSnapshot: SkinV2Config,
+    asset?: { path: string; asset: SkinAsset; file?: File }
+  ) => {
+    // 旧快照的撤销历史只保留一步，新的覆盖它之前先回收旧快照占着的 URL。
+    discardUndo();
+    undoRef.current = { label, config: configSnapshot, asset };
+    setUndoLabel(label);
+  };
+
+  const handleUndo = () => {
+    const snapshot = undoRef.current;
+    if (!snapshot) return;
+    setConfig(snapshot.config);
+    if (snapshot.asset) {
+      const { path, asset, file } = snapshot.asset;
+      const reloaded = file ? { ...asset, blobUrl: URL.createObjectURL(file) } : asset;
+      if (file) ownedUrlsRef.current.add(reloaded.blobUrl);
+      setAssets(prev => new Map(prev).set(path, reloaded));
+      // 撤销已经消费掉这次操作，再「撤销」没有意义，直接收起提示条。
+      undoRef.current = null;
+      setUndoLabel(null);
+      return;
+    }
+    undoRef.current = null;
+    setUndoLabel(null);
+  };
 
   // 自己 createObjectURL 出来的地址要记着，替换同名素材、切模板、组件卸载三处都要释放。
   // data URL（模板内置图、SSF 解出来的图）不是 object URL，不能 revoke。
@@ -423,6 +473,9 @@ export const App: React.FC = () => {
     if ((cw.decorations ?? []).some(d => d.image === pathKey)) refs.push('自由挂件');
     if (refs.length > 0 && !window.confirm(`${pathKey} 正被${refs.join('、')}使用，删除后会一并清掉，继续吗？`)) return;
 
+    const removed = assets.get(pathKey);
+    if (removed) pushUndo(`删除素材 ${pathKey.replace('assets/', '')}`, config, { path: pathKey, asset: removed, file: removed.file });
+
     setAssets(prev => {
       const next = new Map(prev);
       const asset = next.get(pathKey);
@@ -448,6 +501,24 @@ export const App: React.FC = () => {
     });
   };
 
+  /** 取消槽位但保留素材。快照在 setConfig 之外取，更新函数保持纯函数。
+   *  快照里带上被引用的素材：万一它刚好在上一轮撤销后被删掉，撤销这次清除也能把图找回来。 */
+  const snapshotAssetOf = (pathKey?: string) => {
+    if (!pathKey) return undefined;
+    const asset = assets.get(pathKey);
+    return asset ? { path: pathKey, asset, file: asset.file } : undefined;
+  };
+
+  const handleClearPanel = () => {
+    pushUndo('清除九宫格面板', config, snapshotAssetOf(config.candidate_window.border_image?.source));
+    setConfig(prev => ({ ...prev, candidate_window: { ...prev.candidate_window, border_image: undefined } }));
+  };
+
+  const handleClearBackground = () => {
+    pushUndo('清除卡片背景', config, snapshotAssetOf(config.candidate_window.background?.image));
+    setConfig(prev => ({ ...prev, candidate_window: { ...prev.candidate_window, background: undefined } }));
+  };
+
   const handleSaveSlice = (slice: number[], width: number[], outer: Insets) => {
     setConfig(prev => ({
       ...prev,
@@ -465,6 +536,12 @@ export const App: React.FC = () => {
     setSliceModalOpen(false);
   };
 
+  // 模板高亮只在配置与模板完全一致时出现，改过任意字段就撤掉，避免误导。
+  const activeTemplateId = useMemo(
+    () => SKIN_TEMPLATES.find(tpl => JSON.stringify(tpl.config) === JSON.stringify(config))?.id ?? null,
+    [config]
+  );
+
   const panelPath = config.candidate_window.border_image?.source;
   const panelAsset = panelPath ? assets.get(panelPath) : undefined;
 
@@ -472,6 +549,7 @@ export const App: React.FC = () => {
     <div className={`flex flex-col h-screen w-screen overflow-hidden font-sans ${isDarkMode ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-800'}`}>
       <Header
         skinName={config.meta.name}
+        activeTemplateId={activeTemplateId}
         layoutMode={layoutMode}
         onChangeLayoutMode={setLayoutMode}
         onSelectTemplate={handleSelectTemplate}
@@ -497,6 +575,24 @@ export const App: React.FC = () => {
         </div>
       )}
 
+      {undoLabel && (
+        <div
+          className={`px-4 py-1.5 text-xs flex items-center justify-between gap-3 border-b ${
+            isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-sky-50 border-sky-200 text-sky-900'
+          }`}
+        >
+          <span>已{undoLabel}</span>
+          <span className="flex items-center gap-3 shrink-0">
+            <button onClick={handleUndo} className="font-medium underline hover:text-sky-600">
+              撤销
+            </button>
+            <button onClick={discardUndo} className="underline opacity-70 hover:opacity-100">
+              关闭
+            </button>
+          </span>
+        </div>
+      )}
+
       <div ref={bodyRef} className={`flex-1 flex overflow-hidden ${draggingSide ? 'select-none' : ''}`}>
         <div style={{ width: leftWidth }} className="shrink-0 flex h-full min-w-0">
           <AssetManager
@@ -506,13 +602,22 @@ export const App: React.FC = () => {
             onRemoveAsset={handleRemoveAsset}
             onSetPanelImage={handleSetPanelImage}
             onSetBackgroundImage={handleSetBackgroundImage}
+            onClearPanel={handleClearPanel}
+            onClearBackground={handleClearBackground}
             onAddDecorationFromAsset={handleAddDecorationFromAsset}
             onOpenSliceModal={() => setSliceModalOpen(true)}
             isDarkMode={isDarkMode}
           />
         </div>
 
-        <Splitter isDarkMode={isDarkMode} dragging={draggingSide === 'left'} onMouseDown={startDrag('left')} />
+        <Splitter
+          isDarkMode={isDarkMode}
+          dragging={draggingSide === 'left'}
+          label="素材库与预览之间的分隔条"
+          width={leftWidth}
+          onMouseDown={startDrag('left')}
+          onNudge={delta => setLeftWidth(prev => clampSideWidths(prev + delta, rightWidth, bodyRef.current?.clientWidth ?? window.innerWidth).left)}
+        />
 
         <main className={`flex-1 flex flex-col relative overflow-hidden min-w-0 ${isDarkMode ? 'bg-slate-950' : 'bg-slate-100'}`}>
           <div className={`h-10 border-b px-4 flex items-center justify-between text-xs select-none ${isDarkMode ? 'border-slate-800 bg-slate-900/60 text-slate-400' : 'border-slate-200 bg-white text-slate-600'}`}>
@@ -529,21 +634,6 @@ export const App: React.FC = () => {
                 className={`px-2 py-0.5 rounded transition ${previewTheme === 'light' ? 'bg-emerald-600 text-white font-medium' : ''}`}
               >
                 浅色
-              </button>
-              <span className="ml-3">渲染后端:</span>
-              <button
-                onClick={() => setPreviewBackend('webview2')}
-                title="真实候选窗页面，v2 皮肤的设计目标"
-                className={`px-2 py-0.5 rounded transition ${previewBackend === 'webview2' ? 'bg-emerald-600 text-white font-medium' : ''}`}
-              >
-                WebView2
-              </button>
-              <button
-                onClick={() => setPreviewBackend('d2d')}
-                title="出厂默认后端；v2 的 width_dip / fill / z_index / line_gap 尚未实现"
-                className={`px-2 py-0.5 rounded transition ${previewBackend === 'd2d' ? 'bg-rose-600 text-white font-medium' : ''}`}
-              >
-                D2D
               </button>
               <span className="ml-3 text-slate-500">基础皮肤: {config.meta.base}</span>
             </div>
@@ -598,7 +688,6 @@ export const App: React.FC = () => {
               assets={assets}
               layoutMode={layoutMode}
               theme={previewTheme}
-              backend={previewBackend}
               samplePinyin={samplePinyin}
               sampleCandidates={sampleCandidates}
               sampleTranslations={sampleTranslations}
@@ -643,13 +732,9 @@ export const App: React.FC = () => {
           )}
 
           <div className={`h-7 border-t px-4 flex items-center justify-between text-[11px] ${isDarkMode ? 'border-slate-800 text-slate-500 bg-slate-900/60' : 'border-slate-200 text-slate-500 bg-white'}`}>
-            <span>拖拽挂件即可微调 offset，正数向右向下，与水杉两端语义一致；改动自动保存到本地</span>
-            <span className="flex items-center gap-3">
-              <span>
-                {previewBackend === 'webview2'
-                  ? '渲染规则对齐 ui-html/webview2/candwnd'
-                  : 'D2D 对齐 candidate_presenter.cpp 与 ui/src/Layout.cpp'}
-              </span>
+            <span className="truncate">拖拽挂件即可微调 offset，正数向右向下；改动自动保存到本地</span>
+            <span className="flex items-center gap-3 shrink-0">
+              <span className="whitespace-nowrap">渲染对齐 candwnd 页面</span>
               <button onClick={resetWidths} className="underline hover:text-emerald-500">
                 重置栏宽
               </button>
@@ -657,7 +742,14 @@ export const App: React.FC = () => {
           </div>
         </main>
 
-        <Splitter isDarkMode={isDarkMode} dragging={draggingSide === 'right'} onMouseDown={startDrag('right')} />
+        <Splitter
+          isDarkMode={isDarkMode}
+          dragging={draggingSide === 'right'}
+          label="预览与属性面板之间的分隔条"
+          width={rightWidth}
+          onMouseDown={startDrag('right')}
+          onNudge={delta => setRightWidth(prev => clampSideWidths(leftWidth, prev - delta, bodyRef.current?.clientWidth ?? window.innerWidth).right)}
+        />
 
         <div style={{ width: rightWidth }} className="shrink-0 flex h-full min-w-0">
           <ConfigPanel
@@ -677,7 +769,7 @@ export const App: React.FC = () => {
           imageSrc={panelAsset.blobUrl}
           imageTitle={panelPath || '面板'}
           slice={config.candidate_window.border_image?.slice_dip || [16, 16, 16, 16]}
-          width={config.candidate_window.border_image?.width_dip || [16, 16, 16, 16]}
+          width={config.candidate_window.border_image?.width_dip ?? []}
           outer={config.candidate_window.outer_insets_dip || { top: 0, right: 0, bottom: 0, left: 0 }}
           onSave={handleSaveSlice}
           onClose={() => setSliceModalOpen(false)}
@@ -687,16 +779,36 @@ export const App: React.FC = () => {
   );
 };
 
-/** 三栏之间的拖拽条。宽度固定 5px，命中区域够大又不抢视觉。 */
+/** 三栏之间的拖拽条。宽度固定 5px，命中区域够大又不抢视觉；聚焦后可用左右方向键微调。 */
 const Splitter: React.FC<{
   isDarkMode: boolean;
   dragging: boolean;
+  label: string;
+  /** 当前栏宽，供 aria-valuenow 读出，屏幕阅读器才知道方向键改到了多少。 */
+  width: number;
   onMouseDown: (e: React.MouseEvent) => void;
-}> = ({ isDarkMode, dragging, onMouseDown }) => (
+  onNudge: (delta: number) => void;
+}> = ({ isDarkMode, dragging, label, width, onMouseDown, onNudge }) => (
   <div
+    role="separator"
+    aria-orientation="vertical"
+    aria-label={label}
+    aria-valuenow={Math.round(width)}
+    aria-valuemin={MIN_SIDE}
+    aria-valuemax={MAX_SIDE}
+    tabIndex={0}
+    title="拖动调整栏宽，聚焦后用方向键微调"
     onMouseDown={onMouseDown}
-    title="拖动调整栏宽"
-    className={`w-[5px] shrink-0 cursor-col-resize transition-colors ${
+    onKeyDown={e => {
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        onNudge(-16);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        onNudge(16);
+      }
+    }}
+    className={`w-[5px] shrink-0 cursor-col-resize transition-colors outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
       dragging
         ? 'bg-emerald-500'
         : isDarkMode

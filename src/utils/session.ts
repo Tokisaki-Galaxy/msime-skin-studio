@@ -1,6 +1,5 @@
 import { LayoutMode, SkinV2Config, ThemeName } from '../types/skin';
 import { validateSkinConfig } from './toml';
-import type { PreviewBackend } from '../components/CandidatePreview';
 
 // 工坊的会话状态：编辑中的皮肤文档加预览上下文。刷新或误关标签不该丢掉这些。
 // assets 里的位图不进这里（objectURL 会失效，File 无法序列化），由导出/导入负责。
@@ -11,7 +10,6 @@ export interface StudioSession {
   config: SkinV2Config;
   layoutMode: LayoutMode;
   previewTheme: ThemeName;
-  previewBackend: PreviewBackend;
   samplePinyin: string;
   sampleCandidates: string[];
   sampleTranslations: string[];
@@ -44,7 +42,6 @@ function parseSession(raw: unknown): StudioSession | null {
     config: config as unknown as SkinV2Config,
     layoutMode: raw.layoutMode === 'vertical' ? 'vertical' : 'horizontal',
     previewTheme: raw.previewTheme === 'light' ? 'light' : 'dark',
-    previewBackend: raw.previewBackend === 'd2d' ? 'd2d' : 'webview2',
     samplePinyin: typeof raw.samplePinyin === 'string' ? raw.samplePinyin : '',
     sampleCandidates: strings(raw.sampleCandidates, []),
     sampleTranslations: strings(raw.sampleTranslations, []),

@@ -100,6 +100,19 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   const selected = selectedDecorationIndex !== null ? decorations[selectedDecorationIndex] : undefined;
   const base = config.meta.base;
   const [onlyModified, setOnlyModified] = useState(false);
+  // 「只看已改」下点重置会让该字段瞬间从列表消失，鼠标停在原地但目标没了。这里记下刚重置的
+  // 字段，短暂保留在列表里，让用户看到它已经变回继承色。
+  const [justReset, setJustReset] = useState<Set<string>>(() => new Set());
+  const markReset = (key: string) => {
+    setJustReset(prev => new Set(prev).add(key));
+    window.setTimeout(() => {
+      setJustReset(prev => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }, 2500);
+  };
 
   // 基础皮肤的实际配色随 base 变化，抽一次给整份面板用。
   const inherited = useMemo(
@@ -125,7 +138,9 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   const colorSection = (theme: ThemeName, title: string) => {
     const colors = config.candidate[theme] || {};
     const showBar = colors.show_selected_bar;
-    const specs = onlyModified ? COLOR_SPECS.filter(s => (colors[s.key] ?? '') !== '') : COLOR_SPECS;
+    const specs = onlyModified
+      ? COLOR_SPECS.filter(s => (colors[s.key] ?? '') !== '' || justReset.has(`${theme}:${String(s.key)}`))
+      : COLOR_SPECS;
 
     return (
       <Section
@@ -182,7 +197,11 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                         fallback={(theme === 'light' ? LIGHT_FALLBACKS[spec.key] : spec.fallback) || spec.fallback}
                         dark={dark}
                         hint={spec.hint}
-                        onChange={v => updateColor(theme, spec.key, v)}
+                        onChange={v => {
+                          // 只有「从有值改成留空」才算重置，正常改色不算。
+                          if (v === undefined && (colors[spec.key] ?? '') !== '') markReset(`${theme}:${String(spec.key)}`);
+                          updateColor(theme, spec.key, v);
+                        }}
                       />
                     ))}
                 </div>

@@ -2,16 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { DecorationAnchor, SkinAsset, SkinV2Config, ThemeName, LayoutMode } from '../../types/skin';
 import { baseSkinCss, SHARED_CANDIDATE_CSS, HORIZONTAL_PAGE_CSS } from '../../skins';
 import { buildHostVars, buildSkinOverrideCss, outerInsetsOf } from '../../utils/skinCss';
-import { buildD2dOverrideCss } from '../../utils/d2dCss';
-
-export type PreviewBackend = 'webview2' | 'd2d';
 
 interface CandidatePreviewProps {
   config: SkinV2Config;
   assets: Map<string, SkinAsset>;
   layoutMode: LayoutMode;
   theme: ThemeName;
-  backend: PreviewBackend;
   samplePinyin: string;
   sampleCandidates: string[];
   sampleTranslations?: string[];
@@ -39,7 +35,6 @@ export const CandidatePreview: React.FC<CandidatePreviewProps> = ({
   assets,
   layoutMode,
   theme,
-  backend,
   samplePinyin,
   sampleCandidates,
   sampleTranslations,
@@ -54,6 +49,16 @@ export const CandidatePreview: React.FC<CandidatePreviewProps> = ({
 }) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [dragging, setDragging] = useState<{ index: number; startX: number; startY: number; baseX: number; baseY: number } | null>(null);
+  // 挂件拖拽的位移直接换算成 offset_dip，正数向右向下，与两端语义一致。
+  // 拖拽期间只更新这份 pending 偏移，松手才写 config：每次 mousemove 都写 config 会让整份
+  // srcdoc 重建、localStorage 反复落盘，拖动时闪烁卡顿。
+  const [previewOffset, setPreviewOffsetState] = useState<{ index: number; x: number; y: number } | null>(null);
+  // 与 previewOffset 同步的 ref，供松手回调读取最新值而不必塞进 updater。
+  const previewOffsetRef = useRef<{ index: number; x: number; y: number } | null>(null);
+  const setPreviewOffset = (next: { index: number; x: number; y: number } | null) => {
+    previewOffsetRef.current = next;
+    setPreviewOffsetState(next);
+  };
   const [frameSize, setFrameSize] = useState({ width: 420, height: 320 });
 
   const assetUrl = (path?: string) => {
@@ -78,13 +83,38 @@ export const CandidatePreview: React.FC<CandidatePreviewProps> = ({
   const padBottom = Math.max(FRAME_PADDING, outer.bottom + FRAME_PADDING);
   const padLeft = Math.max(FRAME_PADDING, outer.left + FRAME_PADDING);
 
+  // iframe 回传：候选点击与内容尺寸。监听常驻，不随 srcdoc 重建而失效。
+  // 来源校验只认自己的 iframe，别的窗口发来的同类消息一律丢弃。
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      if (e.source !== iframeRef.current?.contentWindow) return;
+      const data = e.data as { type?: string; index?: number; width?: number; height?: number } | null;
+      if (!data) return;
+
+      if (data.type === 'msime-select-candidate') {
+        if (typeof data.index !== 'number') return;
+        if (data.index < 0 || data.index >= sampleCandidates.length) return;
+        onSelectCandidate(data.index);
+        return;
+      }
+
+      if (data.type === 'msime-preview-size') {
+        const { width, height } = data;
+        if (typeof width !== 'number' || typeof height !== 'number') return;
+        if (!(width > 0 && height > 0)) return;
+        setFrameSize(prev =>
+          Math.abs(prev.width - width) < 1 && Math.abs(prev.height - height) < 1 ? prev : { width, height }
+        );
+      }
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [onSelectCandidate, sampleCandidates.length]);
+
   const srcdoc = useMemo(() => {
     const hostVars = buildHostVars(config);
     const baseCss = baseSkinCss(base, layoutMode, theme);
-    const overrideCss =
-      backend === 'webview2'
-        ? buildSkinOverrideCss(config, layoutMode, theme, assetUrl)
-        : buildD2dOverrideCss(config, layoutMode, theme, assetUrl);
+    const overrideCss = buildSkinOverrideCss(config, layoutMode, theme, assetUrl);
 
     // fit_content 去掉各皮肤 .container 的 7em 下限，只留皮肤声明的 min_width_dip 与装饰图
     // 宽度。宿主把它拼在内置皮肤 CSS 之后（windows_webview2_skin.cpp:681-686）。
@@ -117,7 +147,7 @@ export const CandidatePreview: React.FC<CandidatePreviewProps> = ({
         }
         const wrapperCls = `row-wrapper${isFirst ? ' first-row-wrapper' : ''}${idx === lastVisible ? ' last-visible' : ''}`;
         return (
-          `<div class="${wrapperCls}">` +
+          `<div class="${wrapperCls}" data-cand-index="${idx}">` +
           `<div class="row cand${isFirst ? ' first' : ''}">` +
           `<div class="text"><span class="${numClass}">${idx + 1}</span>` +
           `<span class="cand-content">${content}</span></div></div></div>`
@@ -144,8 +174,7 @@ export const CandidatePreview: React.FC<CandidatePreviewProps> = ({
 <html lang="zh-CN" data-candidate-layout="${layoutMode}" data-candidate-theme="${theme}"
       data-candidate-skin="${escapeHtml(config.meta.id)}" data-candidate-base="${base}"
       data-page-arrows="${pageArrows ? 'on' : 'off'}"
-      data-fit-content="${config.candidate_window.fit_content ? 'on' : 'off'}"
-      data-preview-backend="${backend}">
+      data-fit-content="${config.candidate_window.fit_content ? 'on' : 'off'}">
 <head>
 <meta charset="UTF-8">
 <style>
@@ -178,80 +207,60 @@ ${arrows}
 ${decorDivs}
   </div>
 </div>
+${buildBridgeScript({ top: padTop, right: padRight, bottom: padBottom, left: padLeft })}
 </body>
 </html>`;
     // assetUrl 依赖 assets；sample* 与选中项都参与生成。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config, layoutMode, theme, backend, samplePinyin, sampleCandidates, sampleTranslations, samplePos, selectedIndex, hasPrevious, hasNext, assets, padTop, padRight, padBottom, padLeft]);
+  }, [config, layoutMode, theme, samplePinyin, sampleCandidates, sampleTranslations, samplePos, selectedIndex, hasPrevious, hasNext, assets, padTop, padRight, padBottom, padLeft]);
 
-  // 预览里候选窗就是整份文档，不能把 iframe 设成 width:100%：卡片按内容撑开时会被父容器
-  // 夹住并裁掉右边。这里量 .stage 的包围盒（它与卡片加留白同尺寸，且不受 overflow 影响），
-  // 把 iframe 设成该尺寸，外层容器负责滚动；字体与图片加载后尺寸会变，所以挂 ResizeObserver。
+  // 尺寸交给 iframe 内的脚本自报（见 PREVIEW_BRIDGE_SCRIPT）：卡片按内容撑开，宿主侧跨文档
+  // 测量要求 allow-same-origin，那样会和 allow-scripts 凑成沙箱逃逸告警。字体与图片加载后
+  // 尺寸会变，脚本那边用 ResizeObserver 盯着 body 与 .stage。
+
+  // 悬停中的挂件，用于命中区高亮：否则用户看不出预览里哪一块可以拖。
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+
+  // 拖拽中把监听挂到 window：鼠标划出预览容器或掠过 iframe 时事件不会丢，松手一定收尾。
   useEffect(() => {
-    const frame = iframeRef.current;
-    if (!frame) return;
-    let observer: ResizeObserver | null = null;
-
-    const measure = () => {
-      try {
-        const doc = frame.contentDocument;
-        const stage = doc?.querySelector('.stage');
-        if (!doc || !stage) return;
-        // body 是 width:max-content，会按内容撑开，所以 documentElement.scrollWidth 就是
-        // 卡片加留白的真实宽度；不需要再逐元素求并集。+2 吸收 subpixel 取整。
-        const w = Math.max(doc.documentElement.scrollWidth, doc.body.scrollWidth) + 2;
-        const h = Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight) + 2;
-        if (w > 0 && h > 0) {
-          setFrameSize(prev =>
-            Math.abs(prev.width - w) < 1 && Math.abs(prev.height - h) < 1 ? prev : { width: w, height: h }
-          );
-        }
-      } catch {
-        /* 跨文档异常忽略，保持上次尺寸 */
-      }
+    if (!dragging) return;
+    const onMove = (e: MouseEvent) => {
+      setPreviewOffset({
+        index: dragging.index,
+        x: Math.round(dragging.baseX + (e.clientX - dragging.startX)),
+        y: Math.round(dragging.baseY + (e.clientY - dragging.startY))
+      });
     };
-
-    const attach = () => {
-      measure();
-      try {
-        const stage = frame.contentDocument?.querySelector('.stage');
-        if (stage && typeof ResizeObserver !== 'undefined') {
-          observer = new ResizeObserver(measure);
-          observer.observe(stage);
-        }
-      } catch {
-        /* 忽略 */
+    // 松手提交读 ref 而不是在 updater 里做副作用：StrictMode 会把 updater 跑两遍，
+    // 那样每次松手都会写两次 config。
+    const onUp = () => {
+      const offset = previewOffsetRef.current;
+      if (offset && offset.index === dragging.index) {
+        onUpdateDecorationOffset?.(dragging.index, { x: offset.x, y: offset.y });
       }
+      setPreviewOffset(null);
+      setDragging(null);
     };
-
-    // srcdoc 写入后内容才就绪；load 事件比固定延时可靠，另外补两次兜底覆盖字体/图片。
-    frame.addEventListener('load', attach);
-    const timers = [window.setTimeout(attach, 60), window.setTimeout(measure, 250), window.setTimeout(measure, 600)];
-    attach();
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
     return () => {
-      frame.removeEventListener('load', attach);
-      timers.forEach(t => window.clearTimeout(t));
-      observer?.disconnect();
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
     };
-  }, [srcdoc, decorations.length]);
-
-  // 挂件拖拽：位移直接换算成 offset_dip，正数向右向下，与两端语义一致。
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!dragging || !onUpdateDecorationOffset) return;
-    onUpdateDecorationOffset(dragging.index, {
-      x: Math.round(dragging.baseX + (e.clientX - dragging.startX)),
-      y: Math.round(dragging.baseY + (e.clientY - dragging.startY))
-    });
-  };
-  const handleMouseUp = () => setDragging(null);
+    // onUpdateDecorationOffset 每次渲染都是新函数，放进依赖会让相邻两次 mousemove 之间重装监听。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dragging]);
 
   // 挂件的拖拽热区画在 iframe 外的一层覆盖层上：iframe 内的挂件是 CSS 背景，命中不便，
   // 且需要跨 iframe 同步坐标。热区相对 .containerParent 定位，坐标参照系与挂件一致。
   const hitOverlay = decorations.map((dec, idx) => {
     if (!assetUrl(dec.image)) return null;
     const isSelected = selectedDecorationIndex === idx;
-    const ox = dec.offset_x_dip ?? 0;
-    const oy = dec.offset_y_dip ?? 0;
+    const isHovered = hoveredIndex === idx;
+    const isDragging = dragging?.index === idx;
+    const pending = previewOffset && previewOffset.index === idx ? previewOffset : null;
+    const ox = pending ? pending.x : dec.offset_x_dip ?? 0;
+    const oy = pending ? pending.y : dec.offset_y_dip ?? 0;
     const style: React.CSSProperties = {
       width: dec.width_dip,
       height: dec.height_dip,
@@ -306,14 +315,25 @@ ${decorDivs}
         key={idx}
         data-decor-hit="1"
         style={style}
-        className={`cursor-move ${isSelected ? 'outline outline-2 outline-emerald-400' : ''}`}
+        title={`挂件 #${idx}，锚点 ${dec.anchor}，拖动调整偏移`}
+        className={`cursor-move pointer-events-auto transition-shadow ${
+          isDragging
+            ? 'outline outline-2 outline-emerald-500 bg-emerald-400/20 shadow-lg'
+            : isSelected
+            ? 'outline outline-2 outline-emerald-400 bg-emerald-400/10'
+            : isHovered
+            ? 'outline outline-2 outline-dashed outline-sky-400 bg-sky-400/10'
+            : ''
+        }`}
+        onMouseEnter={() => setHoveredIndex(idx)}
+        onMouseLeave={() => setHoveredIndex(prev => (prev === idx ? null : prev))}
         onMouseDown={e => {
           e.stopPropagation();
           onSelectDecoration?.(idx);
           setDragging({ index: idx, startX: e.clientX, startY: e.clientY, baseX: ox, baseY: oy });
         }}
       >
-        {isSelected && (
+        {(isSelected || isDragging) && (
           <div className="absolute -top-5 left-0 bg-emerald-600 text-[10px] text-white px-1.5 rounded whitespace-nowrap shadow">
             #{idx} {dec.anchor} ({ox}, {oy})
           </div>
@@ -326,23 +346,13 @@ ${decorDivs}
     <div
       className="relative select-none"
       style={{ width: '100%', overflow: 'auto' }}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp}
       onClick={() => onSelectDecoration?.(null)}
     >
       <div className="relative inline-block">
-        <span
-          className={`absolute top-1 left-1 z-10 text-[10px] leading-4 px-1.5 rounded-full pointer-events-none text-white ${
-            backend === 'd2d' ? 'bg-rose-600/85' : 'bg-emerald-600/85'
-          }`}
-        >
-          {backend === 'd2d' ? 'D2D' : 'WebView2'}
-        </span>
         <iframe
           ref={iframeRef}
           title="候选窗预览"
-          sandbox="allow-same-origin"
+          sandbox="allow-scripts"
           srcDoc={srcdoc}
           style={{
             width: frameSize.width,
@@ -352,22 +362,76 @@ ${decorDivs}
             background: theme === 'dark' ? 'rgba(0,0,0,.28)' : 'rgba(255,255,255,.6)'
           }}
         />
+        {/* 覆盖层整体不吃事件，只有挂件热区自己 pointer-events-auto：否则整块预览的点击会被这层
+            挡住，iframe 里的候选行永远收不到 click。 */}
         {hitOverlay.length > 0 && (
           <div
             className="absolute inset-0 pointer-events-none"
             style={{ padding: `${padTop}px ${padRight}px ${padBottom}px ${padLeft}px` }}
           >
-            <div className="relative h-full pointer-events-none">
-              <div className="absolute inset-0 pointer-events-auto" onClick={e => e.stopPropagation()}>
-                {hitOverlay}
-              </div>
-            </div>
+            <div className="relative h-full pointer-events-none">{hitOverlay}</div>
           </div>
         )}
       </div>
     </div>
   );
 };
+
+/**
+ * 注入 iframe 的最小脚本，只做两件事，不碰皮肤 CSS：
+ *   1. 候选行被点中时把 index 回传给宿主，宿主改 selectedIndex 后 srcdoc 重建、高亮跟着换；
+ *   2. 内容变化时把 body 的 scroll 尺寸报回去，宿主据此设置 iframe 尺寸。
+ *
+ * iframe 因此不需要 allow-same-origin（那是「同时开脚本与同源」的沙箱逃逸告警来源），
+ * 尺寸与点击一律走 postMessage。
+ */
+const buildBridgeScript = (pad: { top: number; right: number; bottom: number; left: number }) => `<script>
+(function () {
+  var PAD_TOP = ${pad.top}, PAD_RIGHT = ${pad.right}, PAD_BOTTOM = ${pad.bottom}, PAD_LEFT = ${pad.left};
+  document.addEventListener('click', function (e) {
+    var el = e.target;
+    while (el && el !== document.body) {
+      if (el.hasAttribute && el.hasAttribute('data-cand-index')) {
+        parent.postMessage({ type: 'msime-select-candidate', index: Number(el.getAttribute('data-cand-index')) }, '*');
+        return;
+      }
+      el = el.parentNode;
+    }
+  });
+
+  var lastW = 0, lastH = 0;
+  function report() {
+    var body = document.body;
+    var stage = document.querySelector('.stage');
+    if (!body || !stage) return;
+    // 内容宽度取卡片本身的包围盒再补上 body 左右内边距：.stage 与 documentElement 的下限都是
+    // iframe 视口宽度，卡片比视口窄时会把视口宽度当成内容宽度报回去，iframe 再也缩不回来。
+    // 高度反过来要用 body.scrollHeight，挂件溢出到卡片外的部分只有它算得进去。
+    var card = document.querySelector('.container') || stage;
+    // .container 才是按内容撑开的元素，.stage 与 containerParent 都会被视口拉到满宽。
+    var w = Math.ceil(card.scrollWidth) + PAD_LEFT + PAD_RIGHT + 2;
+    var h = Math.max(body.scrollHeight, Math.ceil(card.getBoundingClientRect().height) + PAD_TOP + PAD_BOTTOM) + 2;
+    if (w === lastW && h === lastH) return;
+    lastW = w; lastH = h;
+    parent.postMessage({ type: 'msime-preview-size', width: w, height: h }, '*');
+  }
+
+  // 图片与字体加载完尺寸才会定下来，所以从 load 起才开始上报，之后再补几拍收敛。
+  function startWatching() {
+    report();
+    if (window.ResizeObserver) {
+      var body = document.body;
+      var stage = document.querySelector('.stage');
+      var ro = new ResizeObserver(report);
+      if (body) ro.observe(body);
+      if (stage) ro.observe(stage);
+    }
+  }
+  [0, 60, 250, 600].forEach(function (t) { setTimeout(report, t); });
+  if (document.readyState === 'complete') startWatching();
+  else window.addEventListener('load', startWatching);
+})();
+<\/script>`;
 
 function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, c =>

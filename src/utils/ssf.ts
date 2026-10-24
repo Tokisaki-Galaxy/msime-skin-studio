@@ -249,6 +249,53 @@ function anchorFromAlign(value?: string): DecorationAnchor {
 }
 
 /** msime 要求 id 只含小写字母数字与 . _ -，且以字母数字开头，长度 ≤ 64。 */
+/**
+ * 搜狗皮肤制作工具预填、作者常常忘了改的占位名。这些名字等于「没填」。
+ * 只收明显不是真名的值：default / skin 都可能是有意的皮肤名，判成占位会误改名。
+ */
+const PLACEHOLDER_SKIN_NAMES = ['new', 'untitled', '未命名'];
+
+function isPlaceholderName(value: string): boolean {
+  return PLACEHOLDER_SKIN_NAMES.includes(value.trim().toLowerCase());
+}
+
+/**
+ * 文件名去掉扩展名与浏览器另存留下的 "(1)" 尾缀。
+ * 要反复剥：「航海 (1).ssf」「航海.ssf (1)」「航海.ssf.zip」的顺序各不相同，
+ * 只跑一轮会留下 .zip 或 (1) 的残渣。
+ */
+export function stripSkinFileName(fileName: string): string {
+  let out = fileName.trim();
+  for (let i = 0; i < 5; i++) {
+    const before = out;
+    out = out.replace(/\.(ssf|zip)$/i, '').replace(/\s*\(\d+\)$/, '').trim();
+    if (out === before) break;
+  }
+  return out;
+}
+
+/**
+ * 决定导入后的皮肤显示名。
+ * 优先级：skin.ini 里的 skin_name → 文件名 → 「搜狗皮肤 <skin_id>」→ 通用名字。
+ * skin_name 与文件名都可能是占位值（new / skin），浏览器另存还会留下「xxx (1)」尾缀。
+ */
+export function resolveSkinTitle(
+  skinName: string | undefined,
+  fileName: string,
+  skinId?: string
+): { title: string; fellBackFrom?: string } {
+  const rawName = (skinName || '').trim();
+  const baseName = stripSkinFileName(fileName);
+  const placeholderFrom = rawName && isPlaceholderName(rawName) ? rawName : undefined;
+
+  if (rawName && !isPlaceholderName(rawName)) return { title: rawName };
+  if (baseName && !isPlaceholderName(baseName)) return { title: baseName, fellBackFrom: placeholderFrom };
+  // skin_id 缺失时不要拼出「搜狗皮肤 」，那样比直接用通用名更难懂。
+  const idSuffix = (skinId || '').trim();
+  if (idSuffix) return { title: `搜狗皮肤 ${idSuffix}`, fellBackFrom: placeholderFrom };
+  return { title: '未命名搜狗皮肤', fellBackFrom: placeholderFrom };
+}
+
 export function safeSkinId(source: string, skinId?: string): string {
   const ascii = source
     .toLowerCase()
@@ -259,6 +306,7 @@ export function safeSkinId(source: string, skinId?: string): string {
   // 名字全是中文时，用搜狗的 skin_id，再不行就用名字的哈希，保证不同皮肤不会撞 id。
   const numeric = (skinId || '').replace(/[^0-9]/g, '');
   if (numeric) return `sogou_${numeric}`.slice(0, 64);
+  if (!source) return 'sogou_skin_untitled';
   let hash = 0;
   for (let i = 0; i < source.length; i++) hash = (hash * 31 + source.charCodeAt(i)) >>> 0;
   return `sogou_skin_${hash.toString(16)}`;
@@ -331,8 +379,10 @@ export async function processSsfArchive(arrayBuffer: ArrayBuffer, fileName: stri
 
   const warnings: string[] = [];
 
-  const baseName = fileName.replace(/\.ssf$/i, '');
-  const title = general['skin_name'] || baseName;
+  const { title, fellBackFrom } = resolveSkinTitle(general['skin_name'], fileName, general['skin_id']);
+  if (fellBackFrom) {
+    warnings.push(`skin.ini 里的皮肤名是制作工具留下的占位名「${fellBackFrom}」，已改用「${title}」，可在右侧属性里修改。`);
+  }
 
   // ---- 面板与九宫格 ----
   const panelRaw = cand['bg_cand'] || schemeH1['pic'] || '';
@@ -460,7 +510,9 @@ export async function processSsfArchive(arrayBuffer: ArrayBuffer, fileName: stri
   const skinConfig: SkinV2Config = {
     meta: {
       schema_version: 2,
-      id: safeSkinId(baseName, general['skin_id']),
+      // id 用文件名派生，与显示名分开处理：显示名可以回退到 skin_id，
+      // id 必须稳定落在文件名上，否则不同来源的皮肤会互相覆盖。
+      id: safeSkinId(stripSkinFileName(fileName), general['skin_id']),
       name: title,
       version: '1.0.0',
       author: general['skin_author'] || general['author'] || '搜狗皮肤转换器',

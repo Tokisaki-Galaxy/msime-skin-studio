@@ -17,6 +17,7 @@ import { Field } from '../ui/Field';
 import { ColorField } from '../ui/ColorField';
 import { NumberSlider } from '../ui/NumberSlider';
 import { InsetsEditor } from '../ui/InsetsEditor';
+import { setInspectTarget } from '../../utils/inspect';
 
 type Decoration = NonNullable<SkinV2Config['candidate_window']['decorations']>[number];
 
@@ -415,44 +416,46 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
         </Section>
 
         {/* 九宫格面板 */}
-        <Section
-          title="九宫格面板"
-          dark={dark}
-          badge={cw.border_image?.source ? <span className={chipBase(dark)}>已设</span> : undefined}
-          description="用一张贴图当卡片外框，四角固定、边缘拉伸。"
-        >
-          <div className="space-y-3.5">
-            <div className={cn('rounded-md border px-2.5 py-1.5 text-[11px] font-mono truncate', dark ? 'bg-slate-800/60 border-slate-700 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-600')}>
-              {cw.border_image?.source || '未设置，先在左侧素材点「设为面板」'}
+        <div onMouseEnter={() => setInspectTarget('panel')} onMouseLeave={() => setInspectTarget(null)}>
+          <Section
+            title="九宫格面板"
+            dark={dark}
+            badge={cw.border_image?.source ? <span className={chipBase(dark)}>已设</span> : undefined}
+            description="用一张贴图当卡片外框，四角固定、边缘拉伸。"
+          >
+            <div className="space-y-3.5">
+              <div className={cn('rounded-md border px-2.5 py-1.5 text-[11px] font-mono truncate', dark ? 'bg-slate-800/60 border-slate-700 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-600')}>
+                {cw.border_image?.source || '未设置，先在左侧素材点「设为面板」'}
+              </div>
+              {cw.border_image && (
+                <>
+                  <Field label="切片" fieldKey="slice_dip" dark={dark} hint="四角保持原样的尺寸，顺序是上右下左。用左侧的「标定切片」拖拽更直观。">
+                    <NumberList
+                      dark={dark}
+                      values={cw.border_image.slice_dip ?? []}
+                      onChange={v => updateWindow({ border_image: { ...cw.border_image!, slice_dip: v } })}
+                    />
+                  </Field>
+                  <Field label="绘制宽度" fieldKey="width_dip" dark={dark} hint="边框画多宽。留空则与切片一致。">
+                    <NumberList
+                      dark={dark}
+                      values={cw.border_image.width_dip ?? []}
+                      onChange={v => updateWindow({ border_image: { ...cw.border_image!, width_dip: v.length ? v : undefined } })}
+                    />
+                  </Field>
+                  <label className={cn('flex items-center gap-1.5 text-[11px]', textMuted(dark))}>
+                    <input
+                      type="checkbox"
+                      checked={cw.border_image.fill !== false}
+                      onChange={e => updateWindow({ border_image: { ...cw.border_image!, fill: e.target.checked } })}
+                    />
+                    保留中心内容区
+                  </label>
+                </>
+              )}
             </div>
-            {cw.border_image && (
-              <>
-                <Field label="切片" fieldKey="slice_dip" dark={dark} hint="四角保持原样的尺寸，顺序是上右下左。用左侧的「标定切片」拖拽更直观。">
-                  <NumberList
-                    dark={dark}
-                    values={cw.border_image.slice_dip ?? []}
-                    onChange={v => updateWindow({ border_image: { ...cw.border_image!, slice_dip: v } })}
-                  />
-                </Field>
-                <Field label="绘制宽度" fieldKey="width_dip" dark={dark} hint="边框画多宽。留空则与切片一致。">
-                  <NumberList
-                    dark={dark}
-                    values={cw.border_image.width_dip ?? []}
-                    onChange={v => updateWindow({ border_image: { ...cw.border_image!, width_dip: v.length ? v : undefined } })}
-                  />
-                </Field>
-                <label className={cn('flex items-center gap-1.5 text-[11px]', textMuted(dark))}>
-                  <input
-                    type="checkbox"
-                    checked={cw.border_image.fill !== false}
-                    onChange={e => updateWindow({ border_image: { ...cw.border_image!, fill: e.target.checked } })}
-                  />
-                  保留中心内容区
-                </label>
-              </>
-            )}
+          </Section>
           </div>
-        </Section>
 
         {/* 内边距 */}
         <Section
@@ -461,24 +464,35 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
           description="决定文字离边框多远，以及挂件挂到卡片外时窗口要多留多少透明空间。"
         >
           <div className="space-y-4">
-            <Field label="文字内边距" fieldKey="content_insets_dip" dark={dark} hint="从面板外缘量起，渲染时会自动扣掉边框宽度。">
-              <InsetsEditor
-                dark={dark}
-                value={cw.content_insets_dip ?? { top: 0, right: 0, bottom: 0, left: 0 }}
-                topBottomMax={200}
-                rightLeftMax={500}
-                onChange={(v: Insets) => updateWindow({ content_insets_dip: v })}
-              />
-            </Field>
-            <Field label="窗口留白" fieldKey="outer_insets_dip" dark={dark} hint="挂件伸出卡片时，窗口需要多留的空白，否则会被裁掉。">
-              <InsetsEditor
-                dark={dark}
-                value={cw.outer_insets_dip ?? { top: 0, right: 0, bottom: 0, left: 0 }}
-                topBottomMax={500}
-                rightLeftMax={500}
-                onChange={(v: Insets) => updateWindow({ outer_insets_dip: v })}
-              />
-            </Field>
+            {/* 悬停整组字段时，预览里对应区域会点亮。字段名是黑话，光看数字不知道改的是哪块。 */}
+            <div
+              onMouseEnter={() => setInspectTarget('content')}
+              onMouseLeave={() => setInspectTarget(null)}
+            >
+              <Field label="文字内边距" fieldKey="content_insets_dip" dark={dark} hint="从面板外缘量起，渲染时会自动扣掉边框宽度。">
+                <InsetsEditor
+                  dark={dark}
+                  value={cw.content_insets_dip ?? { top: 0, right: 0, bottom: 0, left: 0 }}
+                  topBottomMax={200}
+                  rightLeftMax={500}
+                  onChange={(v: Insets) => updateWindow({ content_insets_dip: v })}
+                />
+              </Field>
+            </div>
+            <div
+              onMouseEnter={() => setInspectTarget('outer')}
+              onMouseLeave={() => setInspectTarget(null)}
+            >
+              <Field label="窗口留白" fieldKey="outer_insets_dip" dark={dark} hint="挂件伸出卡片时，窗口需要多留的空白，否则会被裁掉。">
+                <InsetsEditor
+                  dark={dark}
+                  value={cw.outer_insets_dip ?? { top: 0, right: 0, bottom: 0, left: 0 }}
+                  topBottomMax={500}
+                  rightLeftMax={500}
+                  onChange={(v: Insets) => updateWindow({ outer_insets_dip: v })}
+                />
+              </Field>
+            </div>
           </div>
         </Section>
 

@@ -38,13 +38,23 @@ pnpm dev
 
 | 项目 | 值 |
 | --- | --- |
-| 构建命令 | `pnpm build` |
+| 构建命令 | `pnpm build`（**必须填**，见下） |
 | 部署命令 | `npx wrangler deploy`（默认值，无需修改） |
+| 预览命令 | `npx wrangler preview`（默认值，无需修改） |
 | 包管理器与 Node | 无需设置 |
 
 包管理器与 Node 版本由 Cloudflare 自动检测：它读 `package.json` 的 `packageManager` 字段决定用哪个 pnpm，Node 则用构建环境自带的版本。本项目的构建日志里检测结果是 `pnpm@11.22.0` 与 `nodejs@24.18.0`，构建与部署都正常，所以不需要额外配环境变量。
 
-提交到 `master` 会自动发布生产环境，其他分支生成预览 URL。部署命令读 `wrangler.toml` 里的 `[assets]`，把 `dist` 作为静态资源上传。
+**构建命令留空会导致所有预览构建失败。** Cloudflare 的 Build command 是可选步骤，不填就整段跳过，然后直接执行部署或预览命令。本项目 `wrangler.toml` 里声明的 `assets.directory = "./dist"`，而 `dist` 是构建产物、不提交进仓库，于是 `npx wrangler preview` 会报：
+
+```
+✘ [ERROR] The directory specified by the "assets.directory" field in your configuration file does not exist:
+  /opt/buildhome/repo/dist
+```
+
+填上 `pnpm build` 之后，构建阶段先产出 `dist`，部署与预览两条命令都有东西可传。
+
+提交到 `master` 会自动发布生产环境，其他分支生成预览 URL。部署命令读 `wrangler.toml` 里的 `[assets]`，把 `dist` 作为静态资源上传。预览构建会用 `previews` 块，所以 `wrangler.toml` 里必须保留那个空块，否则 `wrangler preview` 会报缺少配置。
 
 请求默认走 asset-first：命中静态文件就直接返回，不会唤起任何脚本。因此不消耗 Workers 免费版每天 100,000 次的「调用 Worker 脚本」额度，静态资源请求是免费无限的。
 

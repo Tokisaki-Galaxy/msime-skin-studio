@@ -15,6 +15,8 @@ export interface StudioSession {
   sampleTranslations: string[];
   samplePos: string[];
   selectedIndex: number;
+  /** 这份配置从哪来：模板名、导入的搜索皮肤文件名等，恢复后用来告诉用户「你在编辑什么」。 */
+  origin?: string;
 }
 
 export interface RestoredSession {
@@ -46,7 +48,8 @@ function parseSession(raw: unknown): StudioSession | null {
     sampleCandidates: strings(raw.sampleCandidates, []),
     sampleTranslations: strings(raw.sampleTranslations, []),
     samplePos: strings(raw.samplePos, []),
-    selectedIndex: typeof raw.selectedIndex === 'number' && Number.isFinite(raw.selectedIndex) ? raw.selectedIndex : 0
+    selectedIndex: typeof raw.selectedIndex === 'number' && Number.isFinite(raw.selectedIndex) ? raw.selectedIndex : 0,
+    origin: typeof raw.origin === 'string' ? raw.origin : undefined
   };
 }
 

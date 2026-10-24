@@ -11,8 +11,16 @@ import { SKIN_TEMPLATES, SkinTemplate } from './constants/templates';
 import { processSsfArchive } from './utils/ssf';
 import { exportSkinPackage, downloadBlob } from './utils/exporter';
 import { validateSkinConfig } from './utils/toml';
-import { loadSession, saveSession } from './utils/session';
+import { clearSession, loadSession, saveSession } from './utils/session';
 import { importSkinFiles, importSkinToml, importSkinZip, referencedImages, ImportedSkin } from './utils/importer';
+
+/** 给导出结果条用：175.6 KB 这种写法比一串字节数好懂。 */
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+}
 
 const DEFAULT_SLICE = (w: number, h: number) =>
   Math.max(1, Math.min(64, Math.round(Math.min(w || 32, h || 32) * 0.2)));
@@ -64,6 +72,9 @@ export const App: React.FC = () => {
   const [isDarkMode, setIsDarkMode] = useState(false);
   // 会话恢复或导入后的提示，展示一次即可。
   const [restoredNotice, setRestoredNotice] = useState<string | null>(null);
+  // 导出结果。包含文件名、体积与安装指引，关掉之前一直留在页面上。
+  const [exportResult, setExportResult] = useState<{ filename: string; size: number; skinId: string } | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   // 三栏宽度与拖拽状态
   const [leftWidth, setLeftWidth] = useState(DEFAULT_LEFT);
@@ -138,6 +149,10 @@ export const App: React.FC = () => {
   // 恢复要等首次渲染之后再做一次：StrictMode 会把挂载期的 effect 跑两遍，若恢复与保存
   // 在同一次挂载里竞争，第二次恢复会读到被初始状态覆盖的存档、刷新后回到默认值。
   const [hydrated, setHydrated] = useState(false);
+  // 这一轮是否真的写过存档。pristine 时只有写过才需要清，避免每次渲染都 removeItem。
+  const wroteSessionRef = useRef(false);
+  // 当前配置的来源，用于在界面上明确「你在编辑什么」。导入与选模板时更新。
+  const [origin, setOrigin] = useState<string>('内置模板');
   useEffect(() => {
     const restored = loadSession();
     if (restored) {
@@ -150,21 +165,56 @@ export const App: React.FC = () => {
       setSampleTranslations(s.sampleTranslations);
       setSamplePos(s.samplePos);
       setSelectedIndex(s.selectedIndex);
-      setRestoredNotice(
-        restored.issues.length > 0
-          ? `已恢复上次的编辑，但这份配置有 ${restored.issues.length} 处不合法，导出会被拦下。`
-          : '已恢复上次未导出的编辑。'
-      );
+      setOrigin(s.origin || '上次编辑');
+
+      // 素材是 object URL，跨会话必然失效。引用非空时要说清「图丢了」，
+      // 而不是丢一句「已恢复」，让用户对着空素材库和报错自己猜。
+      const lostRefs = referencedImages(s.config).length;
+      // 注意：这里不把引用的图片当成「已丢失」来渲染，只影响提示文案。
+      if (restored.issues.length > 0) {
+        setRestoredNotice(
+          `已恢复上次的配置，但有 ${restored.issues.length} 处不合法，导出会被拦下。` +
+            (lostRefs > 0 ? `另外 ${lostRefs} 张图片不会跨刷新保存，需要重新导入。` : '')
+        );
+      } else if (lostRefs > 0) {
+        setRestoredNotice(
+          `已恢复上次的排版，但 ${lostRefs} 张图片不会跨刷新保存。重新导入同一份皮肤（ZIP 或 .ssf）即可找回。`
+        );
+      } else {
+        setRestoredNotice(null);
+      }
     } else {
       loadTemplate(SKIN_TEMPLATES[0]);
+      setOrigin('内置模板');
     }
     setHydrated(true);
   }, []);
 
   // 会话自动落盘。assets 不进存档，位图靠导出/导入流转。
   // hydrated 为 false 时这一轮是初始状态，不能覆盖存档。
+  // 配置与默认模板完全一致且没有任何素材时压根不落盘：否则第一次来访看一眼就走，
+  // 下次进来会被判成「有未导出的编辑」，弹出误导性的恢复提示。
   useEffect(() => {
     if (!hydrated) return;
+    // 只看 config 与模板是否一致还不够：只切了横竖排或预览主题的用户，改动同样值得留。
+    // 这里把「默认模板 + 默认预览设置」整体当作 pristine，其余一律落盘。
+    const pristine =
+      assets.size === 0 &&
+      JSON.stringify(config) === JSON.stringify(SKIN_TEMPLATES[0].config) &&
+      layoutMode === 'horizontal' &&
+      previewTheme === 'dark' &&
+      !origin.startsWith('搜狗皮肤') &&
+      !origin.startsWith('模板「');
+    if (pristine) {
+      // 改回默认模板后旧存档要清掉，否则下次进来还会读到它、继续弹「已恢复」。
+      // 只在确实写过存档时清一次：否则每次渲染都会调 removeItem。
+      if (wroteSessionRef.current) {
+        clearSession();
+        wroteSessionRef.current = false;
+      }
+      return;
+    }
+    wroteSessionRef.current = true;
     saveSession({
       config,
       layoutMode,
@@ -173,12 +223,23 @@ export const App: React.FC = () => {
       sampleCandidates,
       sampleTranslations,
       samplePos,
-      selectedIndex
+      selectedIndex,
+      origin
     });
-  }, [config, layoutMode, previewTheme, samplePinyin, sampleCandidates, sampleTranslations, samplePos, selectedIndex]);
+  }, [config, layoutMode, previewTheme, samplePinyin, sampleCandidates, sampleTranslations, samplePos, selectedIndex, origin, assets, hydrated]);
 
   // 实时校验：导出按钮据此禁用，面板顶部列出问题，不再等到点导出才 alert。
   const validationIssues = useMemo(() => validateSkinConfig(config).map(i => `${i.field}：${i.message}`), [config]);
+  // 模板内置的占位图是 SVG data URL。导出时会被原样写成 .png，水杉用 WIC 解码打不开，
+  // 用户却会拿到一个「导出成功」的坏皮肤。这里当成阻断项报出来。
+  const placeholderAssets = useMemo(() => {
+    const refs = referencedImages(config);
+    return refs.filter(ref => {
+      const alt = ref.startsWith('assets/') ? ref.slice('assets/'.length) : `assets/${ref}`;
+      const asset = assets.get(ref) ?? assets.get(alt);
+      return !!asset && asset.blobUrl.startsWith('data:image/svg');
+    });
+  }, [config, assets]);
   const assetsMissing = useMemo(() => {
     const refs = referencedImages(config);
     return refs.filter(ref => {
@@ -258,10 +319,13 @@ export const App: React.FC = () => {
   }, []);
 
   // 覆盖编辑中的内容前确认一次，避免模板/导入把手工改的东西直接冲掉。
+  // 要把「被覆盖的是谁」说清楚：只说「当前编辑中的皮肤」，用户根本不知道自己改过什么。
   const confirmDiscard = (what: string): boolean => {
     const touched = JSON.stringify(config) !== JSON.stringify(SKIN_TEMPLATES[0].config) || assets.size > 0;
     if (!touched) return true;
-    return window.confirm(`载入${what}会覆盖当前编辑中的皮肤，继续吗？`);
+    const name = config.meta.name || config.meta.id || '未命名';
+    const assetNote = assets.size > 0 ? `，以及素材库里的 ${assets.size} 张图` : '';
+    return window.confirm(`载入${what}会替换掉当前正在编辑的「${name}」${assetNote}，且不可撤销。继续吗？`);
   };
 
   const loadTemplate = (tpl: SkinTemplate) => {
@@ -279,7 +343,11 @@ export const App: React.FC = () => {
 
   const handleSelectTemplate = (tpl: SkinTemplate) => {
     if (!confirmDiscard(`模板「${tpl.name}」`)) return;
+    // 整份配置被替换后，上一套皮肤留下的撤销快照就失效了。不清掉的话点「撤销」
+    // 会把旧配置盖回新皮肤上，预览变成两套皮肤的拼接体。
+    discardUndo();
     loadTemplate(tpl);
+    setOrigin(`模板「${tpl.name}」`);
     setRestoredNotice(null);
   };
 
@@ -322,8 +390,17 @@ export const App: React.FC = () => {
         releaseAssets(prev);
         return next;
       });
+      discardUndo();
       setConfig(result.skinConfig);
       setSelectedDecorationIndex(null);
+      setOrigin(`搜狗皮肤 ${file.name}`);
+      // 成功与「注意事项」分成两件事说：先前只有 alert，且连带成功提示一起弹，
+      // 关掉之后界面上没有任何「我已经导入成功了」的痕迹。
+      setRestoredNotice(
+        result.warnings.length > 0
+          ? `已导入「${result.skinConfig.meta.name}」。${result.warnings.length} 处已自动处理，详见下方说明。`
+          : `已导入「${result.skinConfig.meta.name}」，共 ${Object.keys(result.images).length} 张图片。`
+      );
       if (result.warnings.length > 0) {
         alert('导入完成，有几处需要你确认：\n\n' + result.warnings.map(w => '· ' + w).join('\n'));
       }
@@ -366,21 +443,41 @@ export const App: React.FC = () => {
       return next;
     });
     // 用导入的配置补全模板默认值，避免缺字段让渲染报错。
+    discardUndo();
     setConfig({ ...SKIN_TEMPLATES[0].config, ...result.config, meta: { ...SKIN_TEMPLATES[0].config.meta, ...result.config.meta } } as SkinV2Config);
     setSelectedDecorationIndex(null);
+    setOrigin(result.sourceLabel);
     const notes: string[] = [];
     if (result.missingImages.length > 0) notes.push(`缺少图片：${result.missingImages.join('、')}，请放进素材库。`);
     notes.push(...result.warnings);
-    setRestoredNotice(notes.length ? `已导入 ${result.sourceLabel}。${notes.join(' ')}` : `已导入 ${result.sourceLabel}。`);
+    const name = result.config.meta?.name || result.sourceLabel;
+    const assetNote = result.assets.size > 0 ? `，共 ${result.assets.size} 张图片` : '';
+    setRestoredNotice(
+      notes.length ? `已导入「${name}」${assetNote}。${notes.join(' ')}` : `已导入「${name}」${assetNote}。`
+    );
   };
 
   const handleExport = async () => {
+    if (exporting) return;
+    setExporting(true);
+    // 上一次的成功横幅先收掉：失败时留着它，页面上会同时出现「已导出」和一条报错。
+    setExportResult(null);
     try {
       const blob = await exportSkinPackage(config, assets);
-      const safeName = (config.meta.id || 'my_skin').replace(/[^a-z0-9._-]/gi, '_');
-      downloadBlob(blob, `${safeName}.zip`);
+      // ZIP 里的根目录名就是 meta.id，文件名也用它，两者必须一致，否则用户按横幅
+      // 去包里找「xxx/」会找不到。
+      const skinId = config.meta.id || 'my_skin';
+      const filename = `${skinId}.zip`;
+      downloadBlob(blob, filename);
+      // 下载是浏览器的行为，页面原本毫无反应，用户连点三次也不知道成没成。
+      // 这里给出文件名、大小与「接下来怎么装」，闭环最后一环。
+      setExportResult({ filename, size: blob.size, skinId });
+      // 导出成功意味着这一轮任务走完了，先前的导入/恢复提示可以让位，避免页头叠两三条横幅。
+      setRestoredNotice(null);
     } catch (err) {
       alert(`导出皮肤失败: ${(err as Error).message || err}`);
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -542,6 +639,51 @@ export const App: React.FC = () => {
     [config]
   );
 
+  // 极限自检的样例数据。全部只动预览样例，不碰皮肤配置。
+  const CHECK_SAMPLES = {
+    longPinyin: {
+      pinyin: "zhe'shi'yi'ge'fei'chang'chang'de'pin'yin'chuan'ce'shi'shui'shan'shu'ru'fa'pi'fu",
+      candidates: ['这是一个非常长的拼音串测试', '折十八式', '这才是', '折射', '折腾', '哲人', '鹧鸪', '浙江', '蔗糖']
+    },
+    manyCandidates: {
+      pinyin: "shui'shan",
+      candidates: ['水杉输入法皮肤', '水杉', '水扇', '税收', '随身', '水山', '睡衫', '水杉树', '水杉林']
+    },
+    singleCandidate: {
+      pinyin: "shui",
+      candidates: ['水杉']
+    },
+    reset: {
+      pinyin: "shui'shan'shu'ru'fa",
+      candidates: ['水杉输入法', '水杉', '水扇', '税收', '随身']
+    }
+  } as const;
+
+  // 进自检前的主题选择，仅用于「复位」还原。声明在 applyCheck 之前，读代码不必往下找。
+  const themeBeforeCheck = useRef<ThemeName | null>(null);
+
+  const applyCheck = (kind: keyof typeof CHECK_SAMPLES) => () => {
+    const sample = CHECK_SAMPLES[kind];
+    setSamplePinyin(sample.pinyin);
+    const n = sample.candidates.length;
+    setSampleCandidates([...sample.candidates]);
+    // 翻译与词性按候选数补齐，避免长度对不上时渲染出空行。
+    setSampleTranslations(Array.from({ length: n }, (_, i) => (i === 0 ? 'metasequoia' : '')));
+    setSamplePos(Array.from({ length: n }, (_, i) => (i === 0 ? 'n.' : '')));
+    setSelectedIndex(0);
+    // 复位时把自检临时借走的主题还回去。
+    if (kind === 'reset' && themeBeforeCheck.current !== null) {
+      setPreviewTheme(themeBeforeCheck.current);
+      themeBeforeCheck.current = null;
+    }
+  };
+
+  const checkBtnCls = `shrink-0 px-2 py-0.5 rounded border transition ${
+    isDarkMode
+      ? 'border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-white'
+      : 'border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+  }`;
+
   const panelPath = config.candidate_window.border_image?.source;
   const panelAsset = panelPath ? assets.get(panelPath) : undefined;
 
@@ -557,7 +699,9 @@ export const App: React.FC = () => {
         onImportSkin={handleImportSkin}
         onImportSkinFiles={handleImportSkinFiles}
         onExport={handleExport}
-        exportDisabled={validationIssues.length > 0}
+        exportDisabled={validationIssues.length > 0 || assetsMissing.length > 0 || placeholderAssets.length > 0}
+        exporting={exporting}
+        origin={origin}
         isDarkMode={isDarkMode}
         onToggleTheme={() => setIsDarkMode(!isDarkMode)}
       />
@@ -570,6 +714,27 @@ export const App: React.FC = () => {
         >
           <span>{restoredNotice}</span>
           <button onClick={() => setRestoredNotice(null)} className="shrink-0 underline opacity-70 hover:opacity-100">
+            知道了
+          </button>
+        </div>
+      )}
+
+      {exportResult && (
+        <div
+          className={`px-4 py-2 text-xs border-b flex items-start justify-between gap-3 ${
+            isDarkMode ? 'bg-emerald-950/50 border-emerald-800 text-emerald-100' : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+          }`}
+        >
+          <div className="min-w-0">
+            <div className="font-medium">
+              已导出 {exportResult.filename}（{formatBytes(exportResult.size)}），请在浏览器的下载列表里找它。
+            </div>
+            <div className="mt-1 leading-relaxed opacity-85">
+              装进水杉：解压这个 ZIP，得到 <code className="font-mono">{exportResult.skinId}/</code> 目录，
+              整个放进水杉的皮肤目录，再到输入法设置里切换到这个皮肤即可。
+            </div>
+          </div>
+          <button onClick={() => setExportResult(null)} className="shrink-0 underline opacity-70 hover:opacity-100">
             知道了
           </button>
         </div>
@@ -668,6 +833,48 @@ export const App: React.FC = () => {
             </div>
           </div>
 
+          {/* 极限自检。输入法皮肤最容易坏在「用默认样例看着挺好、真实长句子/满候选就崩」，
+              手心与搜狗都有同类检错模式。这里用一键按钮把样例推到边界，缺陷直接可见。 */}
+          <div className={`h-8 border-b px-4 flex items-center gap-2 text-[11px] whitespace-nowrap overflow-x-auto select-none ${isDarkMode ? 'border-slate-800 bg-slate-900/30 text-slate-400' : 'border-slate-200 bg-white/60 text-slate-500'}`}>
+            <span className="shrink-0">自检:</span>
+            <button
+              onClick={applyCheck('longPinyin')}
+              title="超长拼音串：检查预编辑区换行与卡片撑宽"
+              className={checkBtnCls}
+            >
+              长拼音
+            </button>
+            <button
+              onClick={applyCheck('manyCandidates')}
+              title="塞满 9 个候选：检查候选区高度与翻页箭头位置"
+              className={checkBtnCls}
+            >
+              满候选
+            </button>
+            <button
+              onClick={applyCheck('singleCandidate')}
+              title="只剩 1 个候选：检查最小尺寸下九宫格是否变形"
+              className={checkBtnCls}
+            >
+              单候选
+            </button>
+            {/* 自检只切临时视图，不改写会话里记住的主题偏好：进自检前的选择存在 ref 里，
+                点「复位」时还原。否则用户点一下自检，下次打开页面主题就悄悄变了。 */}
+            <button
+              onClick={() => {
+                if (themeBeforeCheck.current === null) themeBeforeCheck.current = previewTheme;
+                setPreviewTheme(previewTheme === 'dark' ? 'light' : 'dark');
+              }}
+              title="临时切到另一套配色，检查两边是否都可读；点「复位」还原"
+              className={checkBtnCls}
+            >
+              切换深浅色
+            </button>
+            <button onClick={applyCheck('reset')} title="恢复到默认示例" className={checkBtnCls}>
+              复位
+            </button>
+          </div>
+
           <SampleDataEditor
             pinyin={samplePinyin}
             candidates={sampleCandidates}
@@ -702,12 +909,25 @@ export const App: React.FC = () => {
             />
           </div>
 
-          {(validationIssues.length > 0 || assetsMissing.length > 0) && (
+          {(validationIssues.length > 0 || assetsMissing.length > 0 || placeholderAssets.length > 0) && (
             <div
               className={`max-h-32 overflow-y-auto border-t px-4 py-2 text-[11px] ${
                 isDarkMode ? 'border-slate-800 bg-rose-950/40 text-rose-200' : 'border-rose-200 bg-rose-50 text-rose-800'
               }`}
             >
+              {placeholderAssets.length > 0 && (
+                <>
+                  <div className="font-medium mb-0.5">还在用模板占位图（{placeholderAssets.length}）</div>
+                  <p className="mb-1 opacity-90">
+                    这些是模板内置的矢量占位图，导出后会写成 .png，水杉打不开。请换成真正的 PNG 再导出。
+                  </p>
+                  <ul className="list-disc pl-4 space-y-0.5">
+                    {placeholderAssets.map((p, i) => (
+                      <li key={i}>{p}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
               {validationIssues.length > 0 && (
                 <>
                   <div className="font-medium mb-0.5">导出会被水杉拒绝（{validationIssues.length}）</div>

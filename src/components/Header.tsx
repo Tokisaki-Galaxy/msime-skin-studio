@@ -8,6 +8,10 @@ interface HeaderProps {
   onImportSkinFiles: (files: File[]) => void;
   onExport: () => void;
   exportDisabled?: boolean;
+  /** 导出进行中：按钮显示进度并禁止重复点击。 */
+  exporting?: boolean;
+  /** 当前配置的来源，例如「模板『现代磨砂』」。 */
+  origin?: string;
   layoutMode: 'horizontal' | 'vertical';
   onChangeLayoutMode: (mode: 'horizontal' | 'vertical') => void;
   skinName: string;
@@ -24,6 +28,8 @@ export const Header: React.FC<HeaderProps> = ({
   onImportSkinFiles,
   onExport,
   exportDisabled = false,
+  exporting = false,
+  origin,
   layoutMode,
   onChangeLayoutMode,
   skinName,
@@ -85,7 +91,17 @@ export const Header: React.FC<HeaderProps> = ({
                 v2 规范
               </span>
             </h1>
-            <div className={`text-[11px] truncate max-w-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>{skinName}</div>
+            {/* 皮肤名与来源要能被一眼看到：先前只是 11px 灰字，新手确认不了自己在编辑什么。 */}
+            <div className="flex items-center gap-1.5 text-[11px] mt-0.5">
+              <span className={`font-medium truncate max-w-[220px] ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`} title={skinName}>
+                {skinName || '未命名皮肤'}
+              </span>
+              {origin && (
+                <span className={`truncate max-w-[180px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} title={origin}>
+                  来自 {origin}
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
@@ -194,15 +210,23 @@ export const Header: React.FC<HeaderProps> = ({
 
         <button
           onClick={onExport}
-          disabled={exportDisabled}
-          title={exportDisabled ? '配置还有会被水杉拒绝的问题，见预览下方清单' : '打包成 <id>/skin.toml 加 <id>/assets/'}
+          disabled={exportDisabled || exporting}
+          title={
+            exportDisabled
+              ? '配置或素材还有问题，见预览下方清单'
+              : exporting
+              ? '正在打包…'
+              : '打包成 <id>/skin.toml 加 <id>/assets/'
+          }
           className={`px-4 py-1.5 text-xs font-medium rounded-lg transition shadow-md ${
             exportDisabled
               ? 'bg-slate-400 text-white cursor-not-allowed shadow-none'
+              : exporting
+              ? 'bg-emerald-700 text-white cursor-wait shadow-none'
               : 'text-white bg-emerald-600 hover:bg-emerald-500 shadow-emerald-900/20'
           }`}
         >
-          打包导出皮肤 (ZIP)
+          {exporting ? '正在打包…' : '打包导出皮肤 (ZIP)'}
         </button>
       </div>
     </header>

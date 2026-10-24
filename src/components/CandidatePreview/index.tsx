@@ -2,16 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { DecorationAnchor, SkinAsset, SkinV2Config, ThemeName, LayoutMode } from '../../types/skin';
 import { baseSkinCss, SHARED_CANDIDATE_CSS, HORIZONTAL_PAGE_CSS } from '../../skins';
 import { buildHostVars, buildSkinOverrideCss, outerInsetsOf } from '../../utils/skinCss';
-import { buildD2dOverrideCss } from '../../utils/d2dCss';
-
-export type PreviewBackend = 'webview2' | 'd2d';
 
 interface CandidatePreviewProps {
   config: SkinV2Config;
   assets: Map<string, SkinAsset>;
   layoutMode: LayoutMode;
   theme: ThemeName;
-  backend: PreviewBackend;
   samplePinyin: string;
   sampleCandidates: string[];
   sampleTranslations?: string[];
@@ -39,7 +35,6 @@ export const CandidatePreview: React.FC<CandidatePreviewProps> = ({
   assets,
   layoutMode,
   theme,
-  backend,
   samplePinyin,
   sampleCandidates,
   sampleTranslations,
@@ -81,10 +76,7 @@ export const CandidatePreview: React.FC<CandidatePreviewProps> = ({
   const srcdoc = useMemo(() => {
     const hostVars = buildHostVars(config);
     const baseCss = baseSkinCss(base, layoutMode, theme);
-    const overrideCss =
-      backend === 'webview2'
-        ? buildSkinOverrideCss(config, layoutMode, theme, assetUrl)
-        : buildD2dOverrideCss(config, layoutMode, theme, assetUrl);
+    const overrideCss = buildSkinOverrideCss(config, layoutMode, theme, assetUrl);
 
     // fit_content 去掉各皮肤 .container 的 7em 下限，只留皮肤声明的 min_width_dip 与装饰图
     // 宽度。宿主把它拼在内置皮肤 CSS 之后（windows_webview2_skin.cpp:681-686）。
@@ -144,8 +136,7 @@ export const CandidatePreview: React.FC<CandidatePreviewProps> = ({
 <html lang="zh-CN" data-candidate-layout="${layoutMode}" data-candidate-theme="${theme}"
       data-candidate-skin="${escapeHtml(config.meta.id)}" data-candidate-base="${base}"
       data-page-arrows="${pageArrows ? 'on' : 'off'}"
-      data-fit-content="${config.candidate_window.fit_content ? 'on' : 'off'}"
-      data-preview-backend="${backend}">
+      data-fit-content="${config.candidate_window.fit_content ? 'on' : 'off'}">
 <head>
 <meta charset="UTF-8">
 <style>
@@ -182,7 +173,7 @@ ${decorDivs}
 </html>`;
     // assetUrl 依赖 assets；sample* 与选中项都参与生成。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config, layoutMode, theme, backend, samplePinyin, sampleCandidates, sampleTranslations, samplePos, selectedIndex, hasPrevious, hasNext, assets, padTop, padRight, padBottom, padLeft]);
+  }, [config, layoutMode, theme, samplePinyin, sampleCandidates, sampleTranslations, samplePos, selectedIndex, hasPrevious, hasNext, assets, padTop, padRight, padBottom, padLeft]);
 
   // 预览里候选窗就是整份文档，不能把 iframe 设成 width:100%：卡片按内容撑开时会被父容器
   // 夹住并裁掉右边。这里量 .stage 的包围盒（它与卡片加留白同尺寸，且不受 overflow 影响），
@@ -332,13 +323,6 @@ ${decorDivs}
       onClick={() => onSelectDecoration?.(null)}
     >
       <div className="relative inline-block">
-        <span
-          className={`absolute top-1 left-1 z-10 text-[10px] leading-4 px-1.5 rounded-full pointer-events-none text-white ${
-            backend === 'd2d' ? 'bg-rose-600/85' : 'bg-emerald-600/85'
-          }`}
-        >
-          {backend === 'd2d' ? 'D2D' : 'WebView2'}
-        </span>
         <iframe
           ref={iframeRef}
           title="候选窗预览"

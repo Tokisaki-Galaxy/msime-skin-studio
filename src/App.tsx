@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Header } from './components/Header';
-import { CandidatePreview, PreviewBackend } from './components/CandidatePreview';
+import { CandidatePreview } from './components/CandidatePreview';
 import { AssetManager } from './components/AssetManager';
 import { ConfigPanel } from './components/ConfigPanel';
 import { SliceModal } from './components/SliceModal';
@@ -53,7 +53,6 @@ export const App: React.FC = () => {
 
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('horizontal');
   const [previewTheme, setPreviewTheme] = useState<ThemeName>('dark');
-  const [previewBackend, setPreviewBackend] = useState<PreviewBackend>('webview2');
   const [samplePinyin, setSamplePinyin] = useState("shui'shan'shu'ru'fa");
   const [sampleCandidates, setSampleCandidates] = useState(['水杉输入法', '水杉', '水扇', '税收', '随身']);
   const [sampleTranslations, setSampleTranslations] = useState<string[]>(['metasequoia', '', '', '', '']);
@@ -144,7 +143,6 @@ export const App: React.FC = () => {
       setConfig(s.config);
       setLayoutMode(s.layoutMode);
       setPreviewTheme(s.previewTheme);
-      setPreviewBackend(s.previewBackend);
       setSamplePinyin(s.samplePinyin);
       setSampleCandidates(s.sampleCandidates.length ? s.sampleCandidates : ['水杉输入法']);
       setSampleTranslations(s.sampleTranslations);
@@ -169,14 +167,13 @@ export const App: React.FC = () => {
       config,
       layoutMode,
       previewTheme,
-      previewBackend,
       samplePinyin,
       sampleCandidates,
       sampleTranslations,
       samplePos,
       selectedIndex
     });
-  }, [config, layoutMode, previewTheme, previewBackend, samplePinyin, sampleCandidates, sampleTranslations, samplePos, selectedIndex]);
+  }, [config, layoutMode, previewTheme, samplePinyin, sampleCandidates, sampleTranslations, samplePos, selectedIndex]);
 
   // 实时校验：导出按钮据此禁用，面板顶部列出问题，不再等到点导出才 alert。
   const validationIssues = useMemo(() => validateSkinConfig(config).map(i => `${i.field}：${i.message}`), [config]);
@@ -530,21 +527,6 @@ export const App: React.FC = () => {
               >
                 浅色
               </button>
-              <span className="ml-3">渲染后端:</span>
-              <button
-                onClick={() => setPreviewBackend('webview2')}
-                title="真实候选窗页面，v2 皮肤的设计目标"
-                className={`px-2 py-0.5 rounded transition ${previewBackend === 'webview2' ? 'bg-emerald-600 text-white font-medium' : ''}`}
-              >
-                WebView2
-              </button>
-              <button
-                onClick={() => setPreviewBackend('d2d')}
-                title="出厂默认后端；v2 的 width_dip / fill / z_index / line_gap 尚未实现"
-                className={`px-2 py-0.5 rounded transition ${previewBackend === 'd2d' ? 'bg-rose-600 text-white font-medium' : ''}`}
-              >
-                D2D
-              </button>
               <span className="ml-3 text-slate-500">基础皮肤: {config.meta.base}</span>
             </div>
 
@@ -598,7 +580,6 @@ export const App: React.FC = () => {
               assets={assets}
               layoutMode={layoutMode}
               theme={previewTheme}
-              backend={previewBackend}
               samplePinyin={samplePinyin}
               sampleCandidates={sampleCandidates}
               sampleTranslations={sampleTranslations}
@@ -645,11 +626,7 @@ export const App: React.FC = () => {
           <div className={`h-7 border-t px-4 flex items-center justify-between text-[11px] ${isDarkMode ? 'border-slate-800 text-slate-500 bg-slate-900/60' : 'border-slate-200 text-slate-500 bg-white'}`}>
             <span>拖拽挂件即可微调 offset，正数向右向下，与水杉两端语义一致；改动自动保存到本地</span>
             <span className="flex items-center gap-3">
-              <span>
-                {previewBackend === 'webview2'
-                  ? '渲染规则对齐 ui-html/webview2/candwnd'
-                  : 'D2D 对齐 candidate_presenter.cpp 与 ui/src/Layout.cpp'}
-              </span>
+              <span>渲染规则对齐 ui-html/webview2/candwnd</span>
               <button onClick={resetWidths} className="underline hover:text-emerald-500">
                 重置栏宽
               </button>

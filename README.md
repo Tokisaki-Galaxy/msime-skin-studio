@@ -7,9 +7,7 @@
 ## 仿真精度
 
 - 候选窗预览跑在独立 iframe 里，与真实页面同构：横竖排各自的页面头、`ui-html/webview2/candwnd/` 的六个内置皮肤 CSS、以及同一套 DOM（`.containerParent > .container > .row.pinyin / .row-wrapper > .row.cand`）。横排的翻译换行、竖排的翻译同行、翻页箭头、`.last-visible` 贴角都按各自页面还原。
-- 顶部「渲染后端」可切换 WebView2 与 D2D 两套仿真，用来对照出厂默认后端与设计目标的差异。
-  - WebView2 逐条对照 `server/src/webview2/windows_webview2_skin.cpp` 生成：九宫格边框、`content_insets_dip`（从面板外缘量起并扣掉边框宽度）、`outer_insets_dip`、`line_gap_dip`、自由挂件的锚点与 `z_index`、以及全部配色键。
-  - D2D 逐条对照 `server/src/window/candidate_presenter.cpp`、`candidate_skin_overlay.cpp` 与 `ui/src/Layout.cpp` 的**决策**：`width_dip` 与 `fill` 被忽略、卡片底色描边圆角保留、`content_insets_dip` 不扣边框、`line_gap_dip` 作用到全部子元素、挂件拉成 `width x height` 不保比例、`z_index` 不分层。它复刻的是两个后端会不一样的地方，不是 D2D 的逐像素栅格化。
+- 渲染逐条对照 `server/src/webview2/windows_webview2_skin.cpp` 生成：九宫格边框、`content_insets_dip`（从面板外缘量起并扣掉边框宽度）、`outer_insets_dip`、`line_gap_dip`、自由挂件的锚点与 `z_index`、以及全部配色键。
 - `src/skins/` 下的 CSS 是从 `msime-windows` 拷来的副本。水杉那边改了基础皮肤，重新拷一次即可。
 
 ## 能力
@@ -17,7 +15,7 @@
 1. 三套起手模板：纯色卡片、九宫格贴图面板加立绘、深色配色。
 2. 可视化九宫格标定：拖动参考线调 `slice_dip`、`width_dip` 与 `outer_insets_dip`，绿色区域就是可拉伸区。
 3. 自由挂件：层数不限，九种锚点，拖拽直接改 `offset_x_dip` / `offset_y_dip`（正数向右向下）。
-4. 候选窗打字仿真：横竖排切换、深浅主题切换、WebView2 与 D2D 后端切换、候选词翻译开关、首选高亮、翻页箭头。
+4. 候选窗打字仿真：横竖排切换、深浅主题切换、候选词翻译开关、首选高亮、翻页箭头。
 5. 搜狗皮肤（`.ssf`）导入：纯 JS 解密与解包，转成 v2 规范。
 6. 一键导出：打包成 `<id>/skin.toml` + `<id>/assets/`，解压后直接放进水杉数据目录。
 

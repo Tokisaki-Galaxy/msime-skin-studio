@@ -620,8 +620,8 @@ export const App: React.FC = () => {
         />
 
         <main className={`flex-1 flex flex-col relative overflow-hidden min-w-0 ${isDarkMode ? 'bg-slate-950' : 'bg-slate-100'}`}>
-          <div className={`h-10 border-b px-4 flex items-center justify-between text-xs select-none ${isDarkMode ? 'border-slate-800 bg-slate-900/60 text-slate-400' : 'border-slate-200 bg-white text-slate-600'}`}>
-            <div className="flex items-center gap-2">
+          <div className={`h-10 border-b px-4 flex items-center justify-between gap-4 text-xs select-none whitespace-nowrap overflow-hidden ${isDarkMode ? 'border-slate-800 bg-slate-900/60 text-slate-400' : 'border-slate-200 bg-white text-slate-600'}`}>
+            <div className="flex items-center gap-2 shrink-0">
               <span>候选框主题:</span>
               <button
                 onClick={() => setPreviewTheme('dark')}
@@ -638,8 +638,8 @@ export const App: React.FC = () => {
               <span className="ml-3 text-slate-500">基础皮肤: {config.meta.base}</span>
             </div>
 
-            <div className="flex items-center gap-3">
-              <label className="flex items-center gap-1.5 cursor-pointer">
+            <div className="flex items-center gap-3 min-w-0">
+              <label className="flex items-center gap-1.5 cursor-pointer shrink-0">
                 <input
                   type="checkbox"
                   checked={sampleTranslations.some(t => !!t)}
@@ -658,12 +658,12 @@ export const App: React.FC = () => {
                 />
                 候选词翻译
               </label>
-              <span>测试拼音:</span>
+              <span className="shrink-0">测试拼音:</span>
               <input
                 type="text"
                 value={samplePinyin}
                 onChange={e => setSamplePinyin(e.target.value)}
-                className={`px-2 py-0.5 rounded border text-xs focus:outline-none focus:border-emerald-500 w-44 ${isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+                className={`px-2 py-0.5 rounded border text-xs focus:outline-none focus:border-emerald-500 w-44 min-w-0 ${isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
               />
             </div>
           </div>

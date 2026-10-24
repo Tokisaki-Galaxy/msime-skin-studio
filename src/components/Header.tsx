@@ -64,66 +64,70 @@ export const Header: React.FC<HeaderProps> = ({
   }`;
 
   return (
+    // 两栏：左栏放标识与模板/布局切换，右栏放 GitHub 与导入导出。挤不下时右栏整体折到下一行，
+    // 而不是把末尾的导出按钮单独挤出去。
     <header
       className={`border-b px-4 py-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 select-none shrink-0 z-20 ${
         isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
       }`}
     >
-      <div className="flex items-center gap-3 min-w-0">
-        <div className="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-900/20 shrink-0">
-          <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
-          </svg>
-        </div>
-        <div className="min-w-0">
-          <h1 className={`text-sm font-bold tracking-tight flex items-center gap-2 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-            水杉输入法皮肤工坊
-            <span className="text-[10px] font-normal text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-              v2 规范
-            </span>
-          </h1>
-          <div className={`text-[11px] truncate max-w-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>{skinName}</div>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-2 flex-wrap">
-        <div className={groupCls}>
-          <span className={groupLabelCls}>模版起手:</span>
-          {SKIN_TEMPLATES.map(tpl => {
-            const isActive = tpl.id === activeTemplateId;
-            return (
-              <button
-                key={tpl.id}
-                onClick={() => onSelectTemplate(tpl)}
-                title={isActive ? `${tpl.description}（当前）` : tpl.description}
-                aria-pressed={isActive}
-                className={`px-2.5 py-1 text-xs rounded transition ${
-                  isActive ? 'bg-emerald-600 text-white font-medium' : idleBtnCls
-                }`}
-              >
-                {tpl.name}
-              </button>
-            );
-          })}
+      <div className="flex items-center gap-4 min-w-0 flex-wrap">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-900/20 shrink-0">
+            <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+            </svg>
+          </div>
+          <div className="min-w-0">
+            <h1 className={`text-sm font-bold tracking-tight flex items-center gap-2 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+              水杉输入法皮肤工坊
+              <span className="text-[10px] font-normal text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                v2 规范
+              </span>
+            </h1>
+            <div className={`text-[11px] truncate max-w-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>{skinName}</div>
+          </div>
         </div>
 
-        <div className={groupCls}>
-          <button
-            onClick={() => onChangeLayoutMode('horizontal')}
-            className={`px-3 py-1 text-xs rounded transition ${
-              layoutMode === 'horizontal' ? 'bg-emerald-600 text-white font-medium' : idleBtnCls
-            }`}
-          >
-            横排
-          </button>
-          <button
-            onClick={() => onChangeLayoutMode('vertical')}
-            className={`px-3 py-1 text-xs rounded transition ${
-              layoutMode === 'vertical' ? 'bg-emerald-600 text-white font-medium' : idleBtnCls
-            }`}
-          >
-            竖排
-          </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className={groupCls}>
+            <span className={groupLabelCls}>模板</span>
+            {SKIN_TEMPLATES.map(tpl => {
+              const isActive = tpl.id === activeTemplateId;
+              return (
+                <button
+                  key={tpl.id}
+                  onClick={() => onSelectTemplate(tpl)}
+                  title={isActive ? `${tpl.description}（当前）` : tpl.description}
+                  aria-pressed={isActive}
+                  className={`px-2.5 py-1 text-xs rounded transition ${
+                    isActive ? 'bg-emerald-600 text-white font-medium' : idleBtnCls
+                  }`}
+                >
+                  {tpl.name}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className={groupCls}>
+            <button
+              onClick={() => onChangeLayoutMode('horizontal')}
+              className={`px-3 py-1 text-xs rounded transition ${
+                layoutMode === 'horizontal' ? 'bg-emerald-600 text-white font-medium' : idleBtnCls
+              }`}
+            >
+              横排
+            </button>
+            <button
+              onClick={() => onChangeLayoutMode('vertical')}
+              className={`px-3 py-1 text-xs rounded transition ${
+                layoutMode === 'vertical' ? 'bg-emerald-600 text-white font-medium' : idleBtnCls
+              }`}
+            >
+              竖排
+            </button>
+          </div>
         </div>
       </div>
 

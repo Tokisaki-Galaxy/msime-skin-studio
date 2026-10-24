@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { DecorationAnchor, SkinAsset, SkinV2Config, ThemeName, LayoutMode } from '../../types/skin';
 import { baseSkinCss, SHARED_CANDIDATE_CSS, HORIZONTAL_PAGE_CSS } from '../../skins';
 import { buildHostVars, buildSkinOverrideCss, outerInsetsOf } from '../../utils/skinCss';
+import { InspectTarget, subscribeInspectTarget } from '../../utils/inspect';
 
 interface CandidatePreviewProps {
   config: SkinV2Config;
@@ -99,12 +100,13 @@ export const CandidatePreview: React.FC<CandidatePreviewProps> = ({
       }
 
       if (data.type === 'msime-preview-size') {
-        const { width, height } = data;
+        const { width, height, box } = data as { width: number; height: number; box?: typeof contentBox };
         if (typeof width !== 'number' || typeof height !== 'number') return;
         if (!(width > 0 && height > 0)) return;
         setFrameSize(prev =>
           Math.abs(prev.width - width) < 1 && Math.abs(prev.height - height) < 1 ? prev : { width, height }
         );
+        if (box && typeof box.top === 'number') setContentBox(box);
       }
     };
     window.addEventListener('message', onMessage);
@@ -220,6 +222,13 @@ ${buildBridgeScript({ top: padTop, right: padRight, bottom: padBottom, left: pad
 
   // 悬停中的挂件，用于命中区高亮：否则用户看不出预览里哪一块可以拖。
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+
+  // 右侧面板正在悬停哪一组字段：对应区域在预览里点亮，解决「这个数字改的是哪一块」。
+  const [inspect, setInspect] = useState<InspectTarget>(null);
+  useEffect(() => subscribeInspectTarget(setInspect), []);
+
+  // 卡片相对预览左上角的位置与尺寸，用来画「文字内边距」高亮框。由 iframe 内脚本量好报回来。
+  const [contentBox, setContentBox] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
 
   // 拖拽中把监听挂到 window：鼠标划出预览容器或掠过 iframe 时事件不会丢，松手一定收尾。
   useEffect(() => {
@@ -372,6 +381,41 @@ ${buildBridgeScript({ top: padTop, right: padRight, bottom: padBottom, left: pad
             <div className="relative h-full pointer-events-none">{hitOverlay}</div>
           </div>
         )}
+
+        {/* 字段高亮层：与上面同坐标系，但完全不吃事件。 */}
+        {inspect && (
+          <div
+            className="absolute inset-0 pointer-events-none z-20"
+            style={{ padding: `${padTop}px ${padRight}px ${padBottom}px ${padLeft}px` }}
+          >
+            <div className="relative h-full">
+              {inspect === 'content' && contentBox && (
+                <div
+                  className="absolute rounded border-2 border-violet-400 bg-violet-400/15"
+                  style={{ top: contentBox.top, left: contentBox.left, width: contentBox.width, height: contentBox.height }}
+                >
+                  <span className="absolute -top-5 left-1 whitespace-nowrap rounded bg-violet-600 px-1.5 text-[10px] text-white">
+                    文字内边距
+                  </span>
+                </div>
+              )}
+              {inspect === 'outer' && (
+                <div className="absolute inset-0 rounded border-2 border-dashed border-sky-400 bg-sky-400/10">
+                  <span className="absolute left-1 top-1 whitespace-nowrap rounded bg-sky-600 px-1.5 text-[10px] text-white">
+                    窗口留白（挂件探出时的余量）
+                  </span>
+                </div>
+              )}
+              {inspect === 'panel' && (
+                <div className="absolute inset-0 rounded border-2 border-emerald-400 bg-emerald-400/10">
+                  <span className="absolute left-1 top-1 whitespace-nowrap rounded bg-emerald-600 px-1.5 text-[10px] text-white">
+                    九宫格面板
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -399,7 +443,7 @@ const buildBridgeScript = (pad: { top: number; right: number; bottom: number; le
     }
   });
 
-  var lastW = 0, lastH = 0;
+  var lastW = 0, lastH = 0, lastBox = { top: -1, left: -1, width: -1, height: -1 };
   function report() {
     var body = document.body;
     var stage = document.querySelector('.stage');
@@ -411,9 +455,17 @@ const buildBridgeScript = (pad: { top: number; right: number; bottom: number; le
     // .container 才是按内容撑开的元素，.stage 与 containerParent 都会被视口拉到满宽。
     var w = Math.ceil(card.scrollWidth) + PAD_LEFT + PAD_RIGHT + 2;
     var h = Math.max(body.scrollHeight, Math.ceil(card.getBoundingClientRect().height) + PAD_TOP + PAD_BOTTOM) + 2;
-    if (w === lastW && h === lastH) return;
-    lastW = w; lastH = h;
-    parent.postMessage({ type: 'msime-preview-size', width: w, height: h }, '*');
+    // 卡片相对 body 左上角的偏移，供宿主在覆盖层上对齐高亮框。
+    var cb = card.getBoundingClientRect();
+    var box = {
+      top: Math.round(cb.top + window.scrollX),
+      left: Math.round(cb.left + window.scrollY),
+      width: Math.round(cb.width),
+      height: Math.round(cb.height)
+    };
+    if (w === lastW && h === lastH && box.top === lastBox.top && box.left === lastBox.left && box.width === lastBox.width) return;
+    lastW = w; lastH = h; lastBox = box;
+    parent.postMessage({ type: 'msime-preview-size', width: w, height: h, box: box }, '*');
   }
 
   // 图片与字体加载完尺寸才会定下来，所以从 load 起才开始上报，之后再补几拍收敛。

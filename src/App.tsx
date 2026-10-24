@@ -149,6 +149,8 @@ export const App: React.FC = () => {
   // 恢复要等首次渲染之后再做一次：StrictMode 会把挂载期的 effect 跑两遍，若恢复与保存
   // 在同一次挂载里竞争，第二次恢复会读到被初始状态覆盖的存档、刷新后回到默认值。
   const [hydrated, setHydrated] = useState(false);
+  // 这一轮是否真的写过存档。pristine 时只有写过才需要清，避免每次渲染都 removeItem。
+  const wroteSessionRef = useRef(false);
   // 当前配置的来源，用于在界面上明确「你在编辑什么」。导入与选模板时更新。
   const [origin, setOrigin] = useState<string>('内置模板');
   useEffect(() => {
@@ -205,9 +207,14 @@ export const App: React.FC = () => {
       !origin.startsWith('模板「');
     if (pristine) {
       // 改回默认模板后旧存档要清掉，否则下次进来还会读到它、继续弹「已恢复」。
-      clearSession();
+      // 只在确实写过存档时清一次：否则每次渲染都会调 removeItem。
+      if (wroteSessionRef.current) {
+        clearSession();
+        wroteSessionRef.current = false;
+      }
       return;
     }
+    wroteSessionRef.current = true;
     saveSession({
       config,
       layoutMode,
@@ -652,6 +659,9 @@ export const App: React.FC = () => {
     }
   } as const;
 
+  // 进自检前的主题选择，仅用于「复位」还原。声明在 applyCheck 之前，读代码不必往下找。
+  const themeBeforeCheck = useRef<ThemeName | null>(null);
+
   const applyCheck = (kind: keyof typeof CHECK_SAMPLES) => () => {
     const sample = CHECK_SAMPLES[kind];
     setSamplePinyin(sample.pinyin);
@@ -667,9 +677,6 @@ export const App: React.FC = () => {
       themeBeforeCheck.current = null;
     }
   };
-
-  // 进自检前的主题选择，仅用于「复位」还原。
-  const themeBeforeCheck = useRef<ThemeName | null>(null);
 
   const checkBtnCls = `shrink-0 px-2 py-0.5 rounded border transition ${
     isDarkMode

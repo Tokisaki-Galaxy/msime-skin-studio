@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { cn } from '../../utils/cn';
 
 interface NumberSliderProps {
@@ -19,10 +19,19 @@ interface NumberSliderProps {
  */
 export const NumberSlider: React.FC<NumberSliderProps> = ({ value, min, max, step = 1, unit, dark, onChange }) => {
   const clamp = (n: number) => Math.min(max, Math.max(min, n));
+  // 输入框的草稿。键入不入配置，失焦或回车才提交：否则输「-500」过程中 -5、-50 会连续写进
+  // 配置，候选窗挂件跟着来回跳，夹到边界后还可能把想输入的值改掉。
+  const [draft, setDraft] = useState<string | null>(null);
 
-  const commit = (raw: string) => {
-    const parsed = Number(raw);
-    if (!Number.isFinite(parsed)) return;
+  const commit = () => {
+    if (draft === null) return;
+    const parsed = Number(draft);
+    setDraft(null);
+    if (draft.trim() === '' || !Number.isFinite(parsed)) {
+      // 清空或写了个非法值：退回当前值，不把 NaN 写进配置。
+      onChange(clamp(value));
+      return;
+    }
     onChange(clamp(parsed));
   };
 
@@ -34,7 +43,10 @@ export const NumberSlider: React.FC<NumberSliderProps> = ({ value, min, max, ste
         max={max}
         step={step}
         value={clamp(value)}
-        onChange={e => onChange(clamp(Number(e.target.value)))}
+        onChange={e => {
+          setDraft(null);
+          onChange(clamp(Number(e.target.value)));
+        }}
         className={cn('flex-1 h-1 rounded appearance-none accent-emerald-500', dark ? 'bg-slate-700' : 'bg-slate-200')}
       />
       <div className="relative shrink-0">
@@ -43,14 +55,17 @@ export const NumberSlider: React.FC<NumberSliderProps> = ({ value, min, max, ste
           min={min}
           max={max}
           step={step}
-          value={Number.isFinite(value) ? value : ''}
-          // 空串先不写配置，避免把 NaN 落进去；失焦时若仍是空则回填边界内的合法值。
-          onChange={e => {
-            if (e.target.value.trim() === '') return;
-            commit(e.target.value);
-          }}
-          onBlur={e => {
-            if (e.target.value.trim() === '') onChange(clamp(value));
+          value={draft ?? (Number.isFinite(value) ? value : '')}
+          onChange={e => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={e => {
+            if (e.key === 'Enter') {
+              commit();
+              (e.target as HTMLInputElement).blur();
+            } else if (e.key === 'Escape') {
+              setDraft(null);
+              (e.target as HTMLInputElement).blur();
+            }
           }}
           className={cn(
             'w-16 rounded-md border px-1.5 py-0.5 text-right text-[11px] font-mono outline-none transition focus:border-emerald-500',

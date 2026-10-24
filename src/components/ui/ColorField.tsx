@@ -39,6 +39,9 @@ export const ColorField: React.FC<ColorFieldProps> = ({
   const [draft, setDraft] = useState<string | null>(null);
   const [draftSwatch, setDraftSwatch] = useState<string | null>(null);
   const [focused, setFocused] = useState(false);
+  // 文本框的输入草稿。键入只更新它，回车或失焦才写配置：拼十六进制时每敲一位都会产生一串
+  // 合法中间值，直接提交会让候选窗反复跳色。
+  const [typing, setTyping] = useState<string | null>(null);
 
   const configured = value ?? '';
   const shown = draft ?? configured;
@@ -119,17 +122,35 @@ export const ColorField: React.FC<ColorFieldProps> = ({
 
         <input
           type="text"
-          value={shown}
+          value={typing ?? shown}
           placeholder={inherited ? `继承 ${inherited}` : '留空沿用 base'}
           onFocus={() => setFocused(true)}
           onBlur={() => {
             setFocused(false);
-            setDraft(null);
+            if (typing !== null) commit(typing);
+            setTyping(null);
+            // 提交后清掉本地草稿，让上方回落到配置值；不合法时由 commit 只保留输入内容展示。
+            if (typing !== null && typing.trim() !== '' && !isColorText(typing)) setDraft(typing);
           }}
-          onChange={e => commit(e.target.value)}
+          onChange={e => {
+            setTyping(e.target.value);
+            // 输入即预览：合法值同步给色块与透明度滑杆，配置仍等提交时才写。
+            if (isColorText(e.target.value) || e.target.value.trim() === '') setDraft(e.target.value || null);
+          }}
+          onKeyDown={e => {
+            if (e.key === 'Enter') {
+              if (typing !== null) commit(typing);
+              setTyping(null);
+              (e.target as HTMLInputElement).blur();
+            } else if (e.key === 'Escape') {
+              setTyping(null);
+              setDraft(null);
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
           className={cn(
             'flex-1 min-w-0 rounded-md border px-2 py-1 text-[11px] font-mono outline-none transition focus:border-emerald-500',
-            invalid && 'border-rose-500',
+            (typing !== null && typing.trim() !== '' && !isColorText(typing)) && 'border-rose-500',
             dark ? 'bg-slate-800 border-slate-700 text-slate-100 placeholder:text-slate-500' : 'bg-white border-slate-200 text-slate-800 placeholder:text-slate-400'
           )}
         />

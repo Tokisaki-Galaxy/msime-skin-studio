@@ -16,6 +16,8 @@ interface SliceModalProps {
 
 type DragTarget = 'top' | 'right' | 'bottom' | 'left' | null;
 
+const SIDE_LABELS: Record<keyof Insets, string> = { top: '上', right: '右', bottom: '下', left: '左' };
+
 export const SliceModal: React.FC<SliceModalProps> = ({ imageSrc, imageTitle, slice, width, outer, onSave, onClose }) => {
   const [sliceInsets, setSliceInsets] = useState<Insets>(() => expandFour(slice));
   const [widthInsets, setWidthInsets] = useState<Insets>(() => (width.length ? expandFour(width) : expandFour(slice)));
@@ -24,6 +26,8 @@ export const SliceModal: React.FC<SliceModalProps> = ({ imageSrc, imageTitle, sl
   const [natural, setNatural] = useState({ width: 0, height: 0 });
   const [dragTarget, setDragTarget] = useState<DragTarget>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // 拖拽开始时的四边快照。闭包里读 sliceInsets 会拿到上一帧的值，拖动时线条跟不上鼠标。
+  const dragStartRef = useRef<Insets | null>(null);
 
   useEffect(() => {
     const img = new Image();
@@ -31,24 +35,64 @@ export const SliceModal: React.FC<SliceModalProps> = ({ imageSrc, imageTitle, sl
     img.onload = () => setNatural({ width: img.naturalWidth, height: img.naturalHeight });
   }, [imageSrc]);
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!dragTarget || !containerRef.current || !natural.width) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    const relX = Math.max(0, Math.min(rect.width, e.clientX - rect.left)) * (natural.width / rect.width);
-    const relY = Math.max(0, Math.min(rect.height, e.clientY - rect.top)) * (natural.height / rect.height);
+  // Esc 关闭。拖拽中按 Esc 先取消拖拽，避免「线跟着鼠标走但已经关窗」。
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      if (dragTarget) {
+        setDragTarget(null);
+        dragStartRef.current = null;
+        return;
+      }
+      onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose, dragTarget]);
 
-    setSliceInsets(prev => {
-      const next = { ...prev };
-      if (dragTarget === 'top') next.top = Math.round(Math.max(0, Math.min(relY, natural.height - prev.bottom - 1)));
-      else if (dragTarget === 'bottom') next.bottom = Math.round(Math.max(0, Math.min(natural.height - relY, natural.height - prev.top - 1)));
-      else if (dragTarget === 'left') next.left = Math.round(Math.max(0, Math.min(relX, natural.width - prev.right - 1)));
-      else next.right = Math.round(Math.max(0, Math.min(natural.width - relX, natural.width - prev.left - 1)));
-      return next;
-    });
+  // 拖拽监听挂在 window：鼠标划出弹窗或掠过图片边缘时事件不会丢，松手总能收尾。
+  useEffect(() => {
+    if (!dragTarget) return;
+    const rect = () => containerRef.current?.getBoundingClientRect();
+
+    const onMove = (e: MouseEvent) => {
+      const box = rect();
+      const start = dragStartRef.current;
+      if (!box || !start || !natural.width) return;
+      const relX = Math.max(0, Math.min(box.width, e.clientX - box.left)) * (natural.width / box.width);
+      const relY = Math.max(0, Math.min(box.height, e.clientY - box.top)) * (natural.height / box.height);
+
+      setSliceInsets(() => {
+        const next = { ...start };
+        if (dragTarget === 'top') next.top = Math.round(Math.max(0, Math.min(relY, natural.height - start.bottom - 1)));
+        else if (dragTarget === 'bottom') next.bottom = Math.round(Math.max(0, Math.min(natural.height - relY, natural.height - start.top - 1)));
+        else if (dragTarget === 'left') next.left = Math.round(Math.max(0, Math.min(relX, natural.width - start.right - 1)));
+        else next.right = Math.round(Math.max(0, Math.min(natural.width - relX, natural.width - start.left - 1)));
+        return next;
+      });
+    };
+    const onUp = () => {
+      setDragTarget(null);
+      dragStartRef.current = null;
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [dragTarget, natural.width, natural.height]);
+
+  const beginDrag = (side: Exclude<DragTarget, null>) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    dragStartRef.current = sliceInsets;
+    setDragTarget(side);
   };
 
   const pct = (value: number, total: number) => (total ? (value / total) * 100 : 0);
 
+  // 滑杆与数字框共用一份状态：滑杆负责快速拖，数字框负责精确值，超出台阶上限也能直接填。
   const sideSlider = (
     label: string,
     key: keyof Insets,
@@ -58,23 +102,39 @@ export const SliceModal: React.FC<SliceModalProps> = ({ imageSrc, imageTitle, sl
     accent: string
   ) => (
     <div>
-      <label className={`text-xs ${accent} flex justify-between`}>
-        <span>{label}</span>
-        <span>{state[key]} px</span>
-      </label>
+      <div className={`text-xs ${accent} flex items-center justify-between gap-2`}>
+        <label htmlFor={`slice-${label}`}>{label}</label>
+        <input
+          id={`slice-${label}`}
+          type="number"
+          value={state[key]}
+          onChange={e => {
+            const raw = Number(e.target.value);
+            const next = Number.isFinite(raw) ? Math.max(0, Math.round(raw)) : 0;
+            setState(prev => ({ ...prev, [key]: next }));
+          }}
+          className="w-16 bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-slate-100 text-right text-xs focus:outline-none focus:border-emerald-500"
+        />
+      </div>
       <input
         type="range"
         min={0}
         max={Math.max(10, total - 2)}
-        value={state[key]}
+        value={Math.min(state[key], Math.max(10, total - 2))}
         onChange={e => setState(prev => ({ ...prev, [key]: Number(e.target.value) }))}
-        className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer mt-1"
+        className={`w-full h-1 rounded-lg appearance-none cursor-pointer mt-1 bg-slate-700 ${accent}`}
       />
     </div>
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 select-none" onMouseUp={() => setDragTarget(null)} onMouseMove={handleMouseMove}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 select-none"
+      onMouseDown={e => {
+        // 只有点遮罩本身才关窗，点面板内容不算。
+        if (e.target === e.currentTarget && !dragTarget) onClose();
+      }}
+    >
       <div className="bg-slate-800 border border-slate-700 rounded-xl shadow-2xl max-w-5xl w-full flex flex-col overflow-hidden">
         <div className="px-5 py-3 border-b border-slate-700 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -86,19 +146,51 @@ export const SliceModal: React.FC<SliceModalProps> = ({ imageSrc, imageTitle, sl
               </span>
             )}
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-700 text-sm">
+          <button
+            onClick={onClose}
+            title="关闭（Esc）"
+            className="text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-700 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+          >
             ✕
           </button>
         </div>
 
         <div className="p-6 flex flex-col md:flex-row gap-6 items-start justify-center">
-          <div ref={containerRef} className="relative border border-slate-600 bg-slate-950 rounded overflow-hidden max-w-[520px] max-h-[520px] flex items-center justify-center cursor-crosshair">
+          <div
+            ref={containerRef}
+            className="relative border border-slate-600 bg-slate-950 rounded overflow-hidden max-w-[520px] max-h-[520px] flex items-center justify-center"
+          >
             <img src={imageSrc} alt="slice source" className="max-w-full max-h-[480px] object-contain pointer-events-none block" />
 
-            <div style={{ top: `${pct(sliceInsets.top, natural.height)}%` }} onMouseDown={() => setDragTarget('top')} className="absolute left-0 right-0 h-0.5 bg-rose-500 cursor-ns-resize z-10" />
-            <div style={{ bottom: `${pct(sliceInsets.bottom, natural.height)}%` }} onMouseDown={() => setDragTarget('bottom')} className="absolute left-0 right-0 h-0.5 bg-rose-500 cursor-ns-resize z-10" />
-            <div style={{ left: `${pct(sliceInsets.left, natural.width)}%` }} onMouseDown={() => setDragTarget('left')} className="absolute top-0 bottom-0 w-0.5 bg-blue-500 cursor-ew-resize z-10" />
-            <div style={{ right: `${pct(sliceInsets.right, natural.width)}%` }} onMouseDown={() => setDragTarget('right')} className="absolute top-0 bottom-0 w-0.5 bg-blue-500 cursor-ew-resize z-10" />
+            {/* 视觉上 2px 的参考线，命中区拉到 14px，否则几乎点不中。 */}
+            <div
+              style={{ top: `${pct(sliceInsets.top, natural.height)}%` }}
+              onMouseDown={beginDrag('top')}
+              className="absolute left-0 right-0 h-3 -mt-1.5 cursor-ns-resize z-10 flex items-center"
+            >
+              <div className={`h-0.5 w-full ${dragTarget === 'top' ? 'bg-rose-300' : 'bg-rose-500'}`} />
+            </div>
+            <div
+              style={{ bottom: `${pct(sliceInsets.bottom, natural.height)}%` }}
+              onMouseDown={beginDrag('bottom')}
+              className="absolute left-0 right-0 h-3 -mb-1.5 cursor-ns-resize z-10 flex items-center"
+            >
+              <div className={`h-0.5 w-full ${dragTarget === 'bottom' ? 'bg-rose-300' : 'bg-rose-500'}`} />
+            </div>
+            <div
+              style={{ left: `${pct(sliceInsets.left, natural.width)}%` }}
+              onMouseDown={beginDrag('left')}
+              className="absolute top-0 bottom-0 w-3 -ml-1.5 cursor-ew-resize z-10 flex justify-center"
+            >
+              <div className={`w-0.5 h-full ${dragTarget === 'left' ? 'bg-blue-300' : 'bg-blue-500'}`} />
+            </div>
+            <div
+              style={{ right: `${pct(sliceInsets.right, natural.width)}%` }}
+              onMouseDown={beginDrag('right')}
+              className="absolute top-0 bottom-0 w-3 -mr-1.5 cursor-ew-resize z-10 flex justify-center"
+            >
+              <div className={`w-0.5 h-full ${dragTarget === 'right' ? 'bg-blue-300' : 'bg-blue-500'}`} />
+            </div>
 
             {/* 可拉伸区提示 */}
             <div
@@ -124,7 +216,7 @@ export const SliceModal: React.FC<SliceModalProps> = ({ imageSrc, imageTitle, sl
               {sideSlider('左 Left', 'left', sliceInsets, setSliceInsets, natural.width, 'text-blue-400')}
             </div>
 
-            <label className="flex items-center gap-2 text-xs text-slate-300 border-t border-slate-700 pt-3">
+            <label className="flex items-center gap-2 text-xs text-slate-300 border-t border-slate-700 pt-3 cursor-pointer">
               <input type="checkbox" checked={useSliceForWidth} onChange={e => setUseSliceForWidth(e.target.checked)} />
               绘制宽度沿用 slice（width_dip 留空）
             </label>
@@ -146,14 +238,19 @@ export const SliceModal: React.FC<SliceModalProps> = ({ imageSrc, imageTitle, sl
             </h4>
             <div className="grid grid-cols-4 gap-1">
               {(['top', 'right', 'bottom', 'left'] as const).map(side => (
-                <input
-                  key={side}
-                  type="number"
-                  title={side}
-                  value={outerInsets[side]}
-                  onChange={e => setOuterInsets(prev => ({ ...prev, [side]: Number(e.target.value) }))}
-                  className="bg-slate-800 border border-slate-700 rounded px-1.5 py-1 text-slate-100 text-center text-xs"
-                />
+                <label key={side} className="flex flex-col items-center gap-0.5">
+                  <span className="text-[10px] text-slate-400">{SIDE_LABELS[side]}</span>
+                  <input
+                    type="number"
+                    value={outerInsets[side]}
+                    onChange={e => {
+                      const raw = Number(e.target.value);
+                      const next = Number.isFinite(raw) ? Math.round(raw) : 0;
+                      setOuterInsets(prev => ({ ...prev, [side]: next }));
+                    }}
+                    className="w-full bg-slate-800 border border-slate-700 rounded px-1 py-1 text-slate-100 text-center text-xs focus:outline-none focus:border-emerald-500"
+                  />
+                </label>
               ))}
             </div>
 

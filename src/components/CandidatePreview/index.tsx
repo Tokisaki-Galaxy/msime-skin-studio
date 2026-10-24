@@ -49,6 +49,10 @@ export const CandidatePreview: React.FC<CandidatePreviewProps> = ({
 }) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [dragging, setDragging] = useState<{ index: number; startX: number; startY: number; baseX: number; baseY: number } | null>(null);
+  // 挂件拖拽的位移直接换算成 offset_dip，正数向右向下，与两端语义一致。
+  // 拖拽期间只更新这份 pending 偏移，松手才写 config：每次 mousemove 都写 config 会让整份
+  // srcdoc 重建、localStorage 反复落盘，拖动时闪烁卡顿。
+  const [previewOffset, setPreviewOffset] = useState<{ index: number; x: number; y: number } | null>(null);
   const [frameSize, setFrameSize] = useState({ width: 420, height: 320 });
 
   const assetUrl = (path?: string) => {
@@ -72,6 +76,20 @@ export const CandidatePreview: React.FC<CandidatePreviewProps> = ({
   const padRight = Math.max(FRAME_PADDING, outer.right + FRAME_PADDING);
   const padBottom = Math.max(FRAME_PADDING, outer.bottom + FRAME_PADDING);
   const padLeft = Math.max(FRAME_PADDING, outer.left + FRAME_PADDING);
+
+  // 候选点击回传。iframe 是 sandbox 文档，靠 postMessage 把 index 送出来；监听常驻，
+  // 不随 srcdoc 重建而失效。
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      if (e.source !== iframeRef.current?.contentWindow) return;
+      const data = e.data as { type?: string; index?: number } | null;
+      if (!data || data.type !== 'msime-select-candidate' || typeof data.index !== 'number') return;
+      if (data.index < 0 || data.index >= sampleCandidates.length) return;
+      onSelectCandidate(data.index);
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [onSelectCandidate, sampleCandidates.length]);
 
   const srcdoc = useMemo(() => {
     const hostVars = buildHostVars(config);
@@ -109,7 +127,7 @@ export const CandidatePreview: React.FC<CandidatePreviewProps> = ({
         }
         const wrapperCls = `row-wrapper${isFirst ? ' first-row-wrapper' : ''}${idx === lastVisible ? ' last-visible' : ''}`;
         return (
-          `<div class="${wrapperCls}">` +
+          `<div class="${wrapperCls}" data-cand-index="${idx}">` +
           `<div class="row cand${isFirst ? ' first' : ''}">` +
           `<div class="text"><span class="${numClass}">${idx + 1}</span>` +
           `<span class="cand-content">${content}</span></div></div></div>`
@@ -169,6 +187,7 @@ ${arrows}
 ${decorDivs}
   </div>
 </div>
+${CANDIDATE_CLICK_SCRIPT}
 </body>
 </html>`;
     // assetUrl 依赖 assets；sample* 与选中项都参与生成。
@@ -226,23 +245,48 @@ ${decorDivs}
     };
   }, [srcdoc, decorations.length]);
 
-  // 挂件拖拽：位移直接换算成 offset_dip，正数向右向下，与两端语义一致。
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!dragging || !onUpdateDecorationOffset) return;
-    onUpdateDecorationOffset(dragging.index, {
-      x: Math.round(dragging.baseX + (e.clientX - dragging.startX)),
-      y: Math.round(dragging.baseY + (e.clientY - dragging.startY))
-    });
-  };
-  const handleMouseUp = () => setDragging(null);
+  // 悬停中的挂件，用于命中区高亮：否则用户看不出预览里哪一块可以拖。
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+
+  // 拖拽中把监听挂到 window：鼠标划出预览容器或掠过 iframe 时事件不会丢，松手一定收尾。
+  useEffect(() => {
+    if (!dragging) return;
+    const onMove = (e: MouseEvent) => {
+      setPreviewOffset({
+        index: dragging.index,
+        x: Math.round(dragging.baseX + (e.clientX - dragging.startX)),
+        y: Math.round(dragging.baseY + (e.clientY - dragging.startY))
+      });
+    };
+    const onUp = () => {
+      setPreviewOffset(offset => {
+        if (offset && offset.index === dragging.index) {
+          onUpdateDecorationOffset?.(dragging.index, { x: offset.x, y: offset.y });
+        }
+        return null;
+      });
+      setDragging(null);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    // onUpdateDecorationOffset 每次渲染都是新函数，放进依赖会让相邻两次 mousemove 之间重装监听。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dragging]);
 
   // 挂件的拖拽热区画在 iframe 外的一层覆盖层上：iframe 内的挂件是 CSS 背景，命中不便，
   // 且需要跨 iframe 同步坐标。热区相对 .containerParent 定位，坐标参照系与挂件一致。
   const hitOverlay = decorations.map((dec, idx) => {
     if (!assetUrl(dec.image)) return null;
     const isSelected = selectedDecorationIndex === idx;
-    const ox = dec.offset_x_dip ?? 0;
-    const oy = dec.offset_y_dip ?? 0;
+    const isHovered = hoveredIndex === idx;
+    const isDragging = dragging?.index === idx;
+    const pending = previewOffset && previewOffset.index === idx ? previewOffset : null;
+    const ox = pending ? pending.x : dec.offset_x_dip ?? 0;
+    const oy = pending ? pending.y : dec.offset_y_dip ?? 0;
     const style: React.CSSProperties = {
       width: dec.width_dip,
       height: dec.height_dip,
@@ -297,14 +341,25 @@ ${decorDivs}
         key={idx}
         data-decor-hit="1"
         style={style}
-        className={`cursor-move ${isSelected ? 'outline outline-2 outline-emerald-400' : ''}`}
+        title={`挂件 #${idx}，锚点 ${dec.anchor}，拖动调整偏移`}
+        className={`cursor-move transition-shadow ${
+          isDragging
+            ? 'outline outline-2 outline-emerald-500 bg-emerald-400/20 shadow-lg'
+            : isSelected
+            ? 'outline outline-2 outline-emerald-400 bg-emerald-400/10'
+            : isHovered
+            ? 'outline outline-2 outline-dashed outline-sky-400 bg-sky-400/10'
+            : ''
+        }`}
+        onMouseEnter={() => setHoveredIndex(idx)}
+        onMouseLeave={() => setHoveredIndex(prev => (prev === idx ? null : prev))}
         onMouseDown={e => {
           e.stopPropagation();
           onSelectDecoration?.(idx);
           setDragging({ index: idx, startX: e.clientX, startY: e.clientY, baseX: ox, baseY: oy });
         }}
       >
-        {isSelected && (
+        {(isSelected || isDragging) && (
           <div className="absolute -top-5 left-0 bg-emerald-600 text-[10px] text-white px-1.5 rounded whitespace-nowrap shadow">
             #{idx} {dec.anchor} ({ox}, {oy})
           </div>
@@ -317,16 +372,13 @@ ${decorDivs}
     <div
       className="relative select-none"
       style={{ width: '100%', overflow: 'auto' }}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp}
       onClick={() => onSelectDecoration?.(null)}
     >
       <div className="relative inline-block">
         <iframe
           ref={iframeRef}
           title="候选窗预览"
-          sandbox="allow-same-origin"
+          sandbox="allow-same-origin allow-scripts"
           srcDoc={srcdoc}
           style={{
             width: frameSize.width,
@@ -352,6 +404,25 @@ ${decorDivs}
     </div>
   );
 };
+
+/**
+ * 注入 iframe 的最小脚本：候选行被点中时把 index 回传给宿主。宿主侧再改 selectedIndex，
+ * srcdoc 随之重建，首选高亮跟着换。脚本只做这件事，不碰皮肤 CSS。
+ */
+const CANDIDATE_CLICK_SCRIPT = `<script>
+(function () {
+  document.addEventListener('click', function (e) {
+    var el = e.target;
+    while (el && el !== document.body) {
+      if (el.hasAttribute && el.hasAttribute('data-cand-index')) {
+        parent.postMessage({ type: 'msime-select-candidate', index: Number(el.getAttribute('data-cand-index')) }, '*');
+        return;
+      }
+      el = el.parentNode;
+    }
+  });
+})();
+<\/script>`;
 
 function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, c =>

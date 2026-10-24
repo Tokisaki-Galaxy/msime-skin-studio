@@ -119,7 +119,9 @@ export const App: React.FC = () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
-  }, [draggingSide, leftWidth, rightWidth]);
+    // 只依赖 draggingSide：左右宽度走 widthsRef 读最新值，否则每帧 setWidth 都会重装监听。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draggingSide]);
 
   const startDrag = (side: 'left' | 'right') => (e: React.MouseEvent) => {
     e.preventDefault();
@@ -187,18 +189,33 @@ export const App: React.FC = () => {
 
   // 最近一次破坏性操作的撤销快照。素材被删后 object URL 已 revoke，撤销时先重新建一个。
   // 只保留一步：够救手滑，又不会把整份历史留在内存里。
+  // createdUrl 记录撤销时新开出来的 object URL，下一次覆盖快照前要回收。
   const undoRef = useRef<{
     label: string;
     config: SkinV2Config;
     asset?: { path: string; asset: SkinAsset; file?: File };
+    createdUrl?: string;
   } | null>(null);
   const [undoLabel, setUndoLabel] = useState<string | null>(null);
+
+  /** 丢弃撤销快照，顺手撤销时新建的 object URL，避免攒下一堆没人引用的地址。 */
+  const discardUndo = () => {
+    const snapshot = undoRef.current;
+    if (snapshot?.createdUrl && ownedUrlsRef.current.has(snapshot.createdUrl)) {
+      URL.revokeObjectURL(snapshot.createdUrl);
+      ownedUrlsRef.current.delete(snapshot.createdUrl);
+    }
+    undoRef.current = null;
+    setUndoLabel(null);
+  };
 
   const pushUndo = (
     label: string,
     configSnapshot: SkinV2Config,
     asset?: { path: string; asset: SkinAsset; file?: File }
   ) => {
+    // 旧快照的撤销历史只保留一步，新的覆盖它之前先回收旧快照占着的 URL。
+    discardUndo();
     undoRef.current = { label, config: configSnapshot, asset };
     setUndoLabel(label);
   };
@@ -209,11 +226,13 @@ export const App: React.FC = () => {
     setConfig(snapshot.config);
     if (snapshot.asset) {
       const { path, asset, file } = snapshot.asset;
-      const reloaded = file
-        ? { ...asset, blobUrl: URL.createObjectURL(file) }
-        : asset;
+      const reloaded = file ? { ...asset, blobUrl: URL.createObjectURL(file) } : asset;
       if (file) ownedUrlsRef.current.add(reloaded.blobUrl);
       setAssets(prev => new Map(prev).set(path, reloaded));
+      // 撤销已经消费掉这次操作，再「撤销」没有意义，直接收起提示条。
+      undoRef.current = null;
+      setUndoLabel(null);
+      return;
     }
     undoRef.current = null;
     setUndoLabel(null);
@@ -482,14 +501,21 @@ export const App: React.FC = () => {
     });
   };
 
-  /** 取消槽位但保留素材。快照在 setConfig 之外取，更新函数保持纯函数。 */
+  /** 取消槽位但保留素材。快照在 setConfig 之外取，更新函数保持纯函数。
+   *  快照里带上被引用的素材：万一它刚好在上一轮撤销后被删掉，撤销这次清除也能把图找回来。 */
+  const snapshotAssetOf = (pathKey?: string) => {
+    if (!pathKey) return undefined;
+    const asset = assets.get(pathKey);
+    return asset ? { path: pathKey, asset, file: asset.file } : undefined;
+  };
+
   const handleClearPanel = () => {
-    pushUndo('清除九宫格面板', config);
+    pushUndo('清除九宫格面板', config, snapshotAssetOf(config.candidate_window.border_image?.source));
     setConfig(prev => ({ ...prev, candidate_window: { ...prev.candidate_window, border_image: undefined } }));
   };
 
   const handleClearBackground = () => {
-    pushUndo('清除卡片背景', config);
+    pushUndo('清除卡片背景', config, snapshotAssetOf(config.candidate_window.background?.image));
     setConfig(prev => ({ ...prev, candidate_window: { ...prev.candidate_window, background: undefined } }));
   };
 
@@ -560,7 +586,7 @@ export const App: React.FC = () => {
             <button onClick={handleUndo} className="font-medium underline hover:text-sky-600">
               撤销
             </button>
-            <button onClick={() => { undoRef.current = null; setUndoLabel(null); }} className="underline opacity-70 hover:opacity-100">
+            <button onClick={discardUndo} className="underline opacity-70 hover:opacity-100">
               关闭
             </button>
           </span>
@@ -588,6 +614,7 @@ export const App: React.FC = () => {
           isDarkMode={isDarkMode}
           dragging={draggingSide === 'left'}
           label="素材库与预览之间的分隔条"
+          width={leftWidth}
           onMouseDown={startDrag('left')}
           onNudge={delta => setLeftWidth(prev => clampSideWidths(prev + delta, rightWidth, bodyRef.current?.clientWidth ?? window.innerWidth).left)}
         />
@@ -705,9 +732,9 @@ export const App: React.FC = () => {
           )}
 
           <div className={`h-7 border-t px-4 flex items-center justify-between text-[11px] ${isDarkMode ? 'border-slate-800 text-slate-500 bg-slate-900/60' : 'border-slate-200 text-slate-500 bg-white'}`}>
-            <span>拖拽挂件即可微调 offset，正数向右向下，与水杉两端语义一致；改动自动保存到本地</span>
-            <span className="flex items-center gap-3">
-              <span>渲染规则对齐 ui-html/webview2/candwnd</span>
+            <span className="truncate">拖拽挂件即可微调 offset，正数向右向下；改动自动保存到本地</span>
+            <span className="flex items-center gap-3 shrink-0">
+              <span className="whitespace-nowrap">渲染对齐 candwnd 页面</span>
               <button onClick={resetWidths} className="underline hover:text-emerald-500">
                 重置栏宽
               </button>
@@ -719,6 +746,7 @@ export const App: React.FC = () => {
           isDarkMode={isDarkMode}
           dragging={draggingSide === 'right'}
           label="预览与属性面板之间的分隔条"
+          width={rightWidth}
           onMouseDown={startDrag('right')}
           onNudge={delta => setRightWidth(prev => clampSideWidths(leftWidth, prev - delta, bodyRef.current?.clientWidth ?? window.innerWidth).right)}
         />
@@ -741,7 +769,7 @@ export const App: React.FC = () => {
           imageSrc={panelAsset.blobUrl}
           imageTitle={panelPath || '面板'}
           slice={config.candidate_window.border_image?.slice_dip || [16, 16, 16, 16]}
-          width={config.candidate_window.border_image?.width_dip || [16, 16, 16, 16]}
+          width={config.candidate_window.border_image?.width_dip ?? []}
           outer={config.candidate_window.outer_insets_dip || { top: 0, right: 0, bottom: 0, left: 0 }}
           onSave={handleSaveSlice}
           onClose={() => setSliceModalOpen(false)}
@@ -756,13 +784,18 @@ const Splitter: React.FC<{
   isDarkMode: boolean;
   dragging: boolean;
   label: string;
+  /** 当前栏宽，供 aria-valuenow 读出，屏幕阅读器才知道方向键改到了多少。 */
+  width: number;
   onMouseDown: (e: React.MouseEvent) => void;
   onNudge: (delta: number) => void;
-}> = ({ isDarkMode, dragging, label, onMouseDown, onNudge }) => (
+}> = ({ isDarkMode, dragging, label, width, onMouseDown, onNudge }) => (
   <div
     role="separator"
     aria-orientation="vertical"
     aria-label={label}
+    aria-valuenow={Math.round(width)}
+    aria-valuemin={MIN_SIDE}
+    aria-valuemax={MAX_SIDE}
     tabIndex={0}
     title="拖动调整栏宽，聚焦后用方向键微调"
     onMouseDown={onMouseDown}

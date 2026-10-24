@@ -41,6 +41,8 @@ export const SliceModal: React.FC<SliceModalProps> = ({ imageSrc, imageTitle, sl
       if (e.key !== 'Escape') return;
       e.stopPropagation();
       if (dragTarget) {
+        // 取消这次拖动：把切片线还原到按下时的位置，而不是停在半路。
+        if (dragStartRef.current) setSliceInsets(dragStartRef.current);
         setDragTarget(null);
         dragStartRef.current = null;
         return;
@@ -94,6 +96,8 @@ export const SliceModal: React.FC<SliceModalProps> = ({ imageSrc, imageTitle, sl
 
   // 滑杆与数字框共用一份状态：滑杆负责快速拖，数字框负责精确值，超出台阶上限也能直接填。
   const sideSlider = (
+    /** slice 与 width 两套滑杆的 label 文案相同，id 前缀要分开，否则 htmlFor 会指向第一套输入框。 */
+    prefix: 'slice' | 'width',
     label: string,
     key: keyof Insets,
     state: Insets,
@@ -103,10 +107,11 @@ export const SliceModal: React.FC<SliceModalProps> = ({ imageSrc, imageTitle, sl
   ) => (
     <div>
       <div className={`text-xs ${accent} flex items-center justify-between gap-2`}>
-        <label htmlFor={`slice-${label}`}>{label}</label>
+        <label htmlFor={`${prefix}-${key}`}>{label}</label>
         <input
-          id={`slice-${label}`}
+          id={`${prefix}-${key}`}
           type="number"
+          min={0}
           value={state[key]}
           onChange={e => {
             const raw = Number(e.target.value);
@@ -210,10 +215,10 @@ export const SliceModal: React.FC<SliceModalProps> = ({ imageSrc, imageTitle, sl
           <div className="flex flex-col gap-4 w-72 bg-slate-900/60 p-4 rounded-lg border border-slate-700">
             <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">切片 slice_dip</h4>
             <div className="space-y-3">
-              {sideSlider('上 Top', 'top', sliceInsets, setSliceInsets, natural.height, 'text-rose-400')}
-              {sideSlider('右 Right', 'right', sliceInsets, setSliceInsets, natural.width, 'text-blue-400')}
-              {sideSlider('下 Bottom', 'bottom', sliceInsets, setSliceInsets, natural.height, 'text-rose-400')}
-              {sideSlider('左 Left', 'left', sliceInsets, setSliceInsets, natural.width, 'text-blue-400')}
+              {sideSlider('slice', '上 Top', 'top', sliceInsets, setSliceInsets, natural.height, 'text-rose-400')}
+              {sideSlider('slice', '右 Right', 'right', sliceInsets, setSliceInsets, natural.width, 'text-blue-400')}
+              {sideSlider('slice', '下 Bottom', 'bottom', sliceInsets, setSliceInsets, natural.height, 'text-rose-400')}
+              {sideSlider('slice', '左 Left', 'left', sliceInsets, setSliceInsets, natural.width, 'text-blue-400')}
             </div>
 
             <label className="flex items-center gap-2 text-xs text-slate-300 border-t border-slate-700 pt-3 cursor-pointer">
@@ -225,10 +230,10 @@ export const SliceModal: React.FC<SliceModalProps> = ({ imageSrc, imageTitle, sl
               <>
                 <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">绘制宽度 width_dip</h4>
                 <div className="space-y-3">
-                  {sideSlider('上 Top', 'top', widthInsets, setWidthInsets, 200, 'text-rose-400')}
-                  {sideSlider('右 Right', 'right', widthInsets, setWidthInsets, 200, 'text-blue-400')}
-                  {sideSlider('下 Bottom', 'bottom', widthInsets, setWidthInsets, 200, 'text-rose-400')}
-                  {sideSlider('左 Left', 'left', widthInsets, setWidthInsets, 200, 'text-blue-400')}
+                  {sideSlider('width', '上 Top', 'top', widthInsets, setWidthInsets, 200, 'text-rose-400')}
+                  {sideSlider('width', '右 Right', 'right', widthInsets, setWidthInsets, 200, 'text-blue-400')}
+                  {sideSlider('width', '下 Bottom', 'bottom', widthInsets, setWidthInsets, 200, 'text-rose-400')}
+                  {sideSlider('width', '左 Left', 'left', widthInsets, setWidthInsets, 200, 'text-blue-400')}
                 </div>
               </>
             )}
@@ -242,6 +247,8 @@ export const SliceModal: React.FC<SliceModalProps> = ({ imageSrc, imageTitle, sl
                   <span className="text-[10px] text-slate-400">{SIDE_LABELS[side]}</span>
                   <input
                     type="number"
+                    min={0}
+                    max={500}
                     value={outerInsets[side]}
                     onChange={e => {
                       const raw = Number(e.target.value);

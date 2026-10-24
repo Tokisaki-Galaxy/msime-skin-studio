@@ -46,8 +46,9 @@ export const ColorField: React.FC<ColorFieldProps> = ({
   const configured = value ?? '';
   const shown = draft ?? configured;
   const isInherited = configured === '';
-  // 留空时，实际生效的是继承色；没有继承色就用兜底。
-  const effective = isInherited ? inherited || fallback : shown;
+  // 实际生效色只认「解析得出的颜色」：手输一半的 #ff 留在 shown 里显示红框，但不能拿去算
+  // 色块与透明度，否则滑杆会跳回 100%。
+  const effective = isInherited ? inherited || fallback : isColorText(shown) ? shown : configured || fallback;
 
   const alpha = extractAlpha(effective);
   const swatch = draftSwatch ?? toOpaqueHex(effective, fallback);
@@ -67,6 +68,8 @@ export const ColorField: React.FC<ColorFieldProps> = ({
   };
 
   const pickRgb = (hex: string) => {
+    // 色块与文本框共用一份显示：改了色块就丢掉文本草稿，否则输入框还挂着旧的非法文本。
+    setTyping(null);
     setDraftSwatch(hex);
     // 色块只给 #rrggbb，这里把原透明度补回去，改色不该顺手抹掉透明度。
     const next = alpha < 1 ? withAlpha(hex, alpha) : hex;
@@ -78,6 +81,7 @@ export const ColorField: React.FC<ColorFieldProps> = ({
     // 基于当前生效色改透明度；留空时就以继承值为基色，第一次拖滑杆也能得到合理结果。
     const source = isColorText(effective) ? effective : fallback;
     const composed = withAlpha(source, next, fallback);
+    setTyping(null);
     setDraftSwatch(toOpaqueHex(composed, fallback));
     setDraft(composed);
     onChange(composed);
@@ -129,7 +133,7 @@ export const ColorField: React.FC<ColorFieldProps> = ({
             setFocused(false);
             if (typing !== null) commit(typing);
             setTyping(null);
-            // 提交后清掉本地草稿，让上方回落到配置值；不合法时由 commit 只保留输入内容展示。
+            // 非法输入留在草稿里显示红框，但 effective 已经不再采信它，透明度不会被带偏。
             if (typing !== null && typing.trim() !== '' && !isColorText(typing)) setDraft(typing);
           }}
           onChange={e => {

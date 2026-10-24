@@ -60,4 +60,17 @@ jobs:
       - name: 校验部署配置
         run: pnpm dlx wrangler@4 deploy --dry-run
 
+      # wrangler.toml 的 assets.directory 必须是 vite 的构建输出目录。两者一旦不一致，
+      # Cloudflare 上就会出现「assets.directory 不存在」——它只跑部署命令、不跑构建时尤其致命。
+      # 这里把两边对一遍，改配置时早失败，而不是等推送后看 Cloudflare 日志。
+      - name: 校验 assets 目录与构建产物一致
+        run: |
+          configured=$(grep -oP '(?<=^directory = ")[^"]+' wrangler.toml)
+          echo "wrangler.toml 声明：${configured}"
+          if [ ! -f "${configured}/index.html" ]; then
+            echo "::error::wrangler.toml 的 assets 目录 ${configured} 里没有 index.html"
+            exit 1
+          fi
+          echo "构建产物正常：$(find "${configured}" -type f | wc -l) 个文件"
+
 

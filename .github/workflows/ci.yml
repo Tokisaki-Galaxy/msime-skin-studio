@@ -53,7 +53,11 @@ jobs:
 
       # 用与 Cloudflare 相同的方式试跑一次部署，只做校验不真正上传。
       # 这样 wrangler.toml 写错（比如 assets 目录不存在）会在 PR 上就暴露。
+      #
+      # wrangler 不在 devDependencies 里：项目运行时只依赖浏览器，没必要为一条门禁往锁文件里
+      # 塞一整套 Cloudflare 工具链。Cloudflare 自己的构建环境也是现拉 npx wrangler，这里用
+      # dlx 对齐，并把大版本钉住，避免上游 major 升级把 CI 带崩。
       - name: 校验部署配置
-        run: pnpm exec wrangler deploy --dry-run
+        run: pnpm dlx wrangler@4 deploy --dry-run
 
 
